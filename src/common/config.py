@@ -27,22 +27,10 @@ import yaml
 
 
 # ---------------------------------------------------------------------------
-# Custom exception (forward-declared here to avoid circular imports; the full
-# hierarchy lives in src.common.exceptions once TASK-004 is implemented).
+# Domain exception — imported from canonical hierarchy (TASK-004).
 # ---------------------------------------------------------------------------
 
-class ConfigurationError(ValueError):
-    """Raised when a configuration file fails schema or value validation.
-
-    Args:
-        message: Human-readable description of the violation.
-        field: Dotted field path that caused the violation, e.g.
-               ``"strategy.opening_range_minutes"``.
-    """
-
-    def __init__(self, message: str, field: str = "") -> None:
-        self.field = field
-        super().__init__(f"[config{':' + field if field else ''}] {message}")
+from src.common.exceptions import ConfigurationError  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
