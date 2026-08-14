@@ -1,0 +1,424 @@
+"""
+src.data.validator
+==================
+Rigorous OHLCV bar integrity validation and anomaly cleaning for the SPY
+Opening Range Breakout (ORB) quantitative trading system.
+
+This module operates on raw, unfiltered bar DataFrames (pre-RTH-filter) and
+produces clean, chronologically sorted bars together with a structured audit
+report.  It is the gating layer between raw Alpaca data and all downstream
+strategy and backtest modules.
+
+Cleaning Pipeline (in order)
+-----------------------------
+1. **Schema check** — assert required columns are present.
+2. **Sort** — sort by timestamp ascending (handles out-of-order delivery).
+3. **Duplicate removal** — keep the bar with the highest volume per timestamp.
+4. **Infinite / NaN purge** — drop rows with ∞ or NaN in any OHLCV column.
+5. **OHLC geometric validation** — drop rows violating:
+   * ``high >= max(open, close, low)``
+   * ``low  <= min(open, close, high)``
+   * ``open, high, low, close > 0``
+   * ``volume >= 0``
+6. **Gap audit** — during RTH hours, flag sessions with missing bars > 5 min.
+7. **Strict mode** — raise ``DataValidationError`` if > 1% of input bars were
+   removed by OHLC checks.
+
+Usage
+-----
+    from src.data.validator import validate_and_clean_bars, ValidationReport
+
+    clean_df, report = validate_and_clean_bars(raw_df)
+    if not report.is_valid:
+        print("Validation failed:", report.flagged_sessions)
+"""
+
+from __future__ import annotations
+
+import datetime
+from dataclasses import dataclass, field
+from typing import List, Tuple
+
+import numpy as np
+import pandas as pd
+
+from src.common.exceptions import DataValidationError
+from src.common.logger import get_logger
+from src.common.time_utils import EASTERN_TZ, filter_rth
+
+logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_REQUIRED_COLS: list[str] = ["timestamp", "open", "high", "low", "close", "volume"]
+_OHLC_ERROR_THRESHOLD: float = 0.01   # 1 % of input bars
+_MAJOR_GAP_MINUTES: int = 5           # > 5 consecutive missing 1-min bars
+_MARKET_OPEN  = datetime.time(9, 30, 0)
+_MARKET_CLOSE = datetime.time(16, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# ValidationReport
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ValidationReport:
+    """Structured audit record produced by :func:`validate_and_clean_bars`.
+
+    Attributes:
+        total_bars_input: Number of bars in the original (uncleaned) DataFrame.
+        total_bars_output: Number of bars in the cleaned output DataFrame.
+        duplicates_removed: Bars eliminated due to duplicate timestamps.
+        invalid_ohlc_removed: Bars eliminated due to NaN/Inf/negative/inverted
+            OHLC values or non-positive prices.
+        missing_timestamps_count: Total number of expected 1-minute slots
+            within RTH that were absent from the data.
+        flagged_sessions: List of session date strings (``YYYY-MM-DD``) whose
+            RTH bars contained a gap exceeding :data:`_MAJOR_GAP_MINUTES`
+            consecutive missing minutes.
+        is_valid: ``True`` if the cleaned DataFrame passed all quality gates;
+            ``False`` if any session was flagged or OHLC errors exceeded the
+            1 % threshold (when ``strict=True``).
+    """
+
+    total_bars_input: int
+    total_bars_output: int
+    duplicates_removed: int
+    invalid_ohlc_removed: int
+    missing_timestamps_count: int
+    flagged_sessions: List[str] = field(default_factory=list)
+    is_valid: bool = True
+
+    def summary(self) -> str:
+        """Return a single-line human-readable summary of the report.
+
+        Returns:
+            Summary string suitable for logging.
+        """
+        return (
+            f"ValidationReport("
+            f"in={self.total_bars_input}, "
+            f"out={self.total_bars_output}, "
+            f"dups_removed={self.duplicates_removed}, "
+            f"ohlc_removed={self.invalid_ohlc_removed}, "
+            f"missing={self.missing_timestamps_count}, "
+            f"flagged_sessions={len(self.flagged_sessions)}, "
+            f"is_valid={self.is_valid})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+def _check_required_columns(df: pd.DataFrame) -> None:
+    """Assert all required OHLCV columns are present.
+
+    Args:
+        df: Input DataFrame.
+
+    Raises:
+        DataValidationError: If any required column is absent.
+    """
+    missing = [c for c in _REQUIRED_COLS if c not in df.columns]
+    if missing:
+        raise DataValidationError(
+            f"Required columns missing from bar DataFrame: {missing}. "
+            f"Available: {list(df.columns)}"
+        )
+
+
+def _sort_chronologically(df: pd.DataFrame) -> pd.DataFrame:
+    """Sort the DataFrame by ``timestamp`` ascending.
+
+    Args:
+        df: Input bar DataFrame (must contain ``"timestamp"`` column).
+
+    Returns:
+        Sorted copy, index reset.
+    """
+    return df.sort_values("timestamp").reset_index(drop=True)
+
+
+def _remove_duplicates(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+    """Remove duplicate timestamps, keeping the bar with the highest volume.
+
+    When two bars share the same timestamp, the one with the greater volume
+    is retained (heuristic: higher volume = more representative bar).
+    If volumes are equal, the last occurrence is kept.
+
+    Args:
+        df: Sorted bar DataFrame.
+
+    Returns:
+        ``(deduped_df, n_removed)`` where ``n_removed`` is the count of rows
+        eliminated.
+    """
+    n_before = len(df)
+    # Sort by timestamp then volume desc so that highest-volume bar comes first
+    # within each duplicate group, then keep the first (=highest volume).
+    df_sorted = df.sort_values(
+        ["timestamp", "volume"], ascending=[True, False]
+    )
+    df_deduped = df_sorted.drop_duplicates(subset=["timestamp"], keep="first")
+    # Restore chronological order
+    df_deduped = df_deduped.sort_values("timestamp").reset_index(drop=True)
+    n_removed = n_before - len(df_deduped)
+    return df_deduped, n_removed
+
+
+def _remove_nan_inf(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+    """Drop rows containing NaN or ±Inf in any OHLCV column.
+
+    Args:
+        df: Input bar DataFrame.
+
+    Returns:
+        ``(clean_df, n_removed)``.
+    """
+    n_before = len(df)
+    ohlcv = ["open", "high", "low", "close", "volume"]
+    numeric_cols = [c for c in ohlcv if c in df.columns]
+
+    # Replace ±Inf with NaN then drop any row that has NaN in numeric columns
+    df_clean = df.copy()
+    df_clean[numeric_cols] = df_clean[numeric_cols].replace(
+        [np.inf, -np.inf], np.nan
+    )
+    df_clean = df_clean.dropna(subset=numeric_cols).reset_index(drop=True)
+    return df_clean, n_before - len(df_clean)
+
+
+def _validate_ohlc_geometry(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+    """Remove bars that violate OHLC geometric consistency constraints.
+
+    Constraints applied (vectorised):
+    * ``high >= max(open, close, low)``
+    * ``low  <= min(open, close, high)``
+    * ``open > 0, high > 0, low > 0, close > 0``
+    * ``volume >= 0``
+
+    Args:
+        df: Bar DataFrame (NaN/Inf already removed).
+
+    Returns:
+        ``(valid_df, n_removed)``.
+    """
+    n_before = len(df)
+
+    positive_prices = (
+        (df["open"]  > 0) &
+        (df["high"]  > 0) &
+        (df["low"]   > 0) &
+        (df["close"] > 0)
+    )
+    non_negative_volume = df["volume"] >= 0
+    high_is_max = df["high"] >= df[["open", "close", "low"]].max(axis=1)
+    low_is_min  = df["low"]  <= df[["open", "close", "high"]].min(axis=1)
+
+    valid_mask = positive_prices & non_negative_volume & high_is_max & low_is_min
+    n_invalid = (~valid_mask).sum()
+
+    if n_invalid > 0:
+        logger.warning(
+            "Dropping %d bar(s) with OHLC geometric violations.", n_invalid
+        )
+
+    return df.loc[valid_mask].reset_index(drop=True), int(n_invalid)
+
+
+def _audit_rth_gaps(
+    df: pd.DataFrame,
+) -> Tuple[int, List[str]]:
+    """Audit RTH bars for missing 1-minute slots and flag sessions with major gaps.
+
+    For each trading session (identified by Eastern date), the expected 1-minute
+    slots within ``[09:30, 16:00]`` are compared against the actual timestamps
+    present.  A session is flagged when any contiguous run of missing minutes
+    exceeds :data:`_MAJOR_GAP_MINUTES`.
+
+    Args:
+        df: Cleaned bar DataFrame with UTC-aware ``timestamp`` column.
+
+    Returns:
+        ``(total_missing, flagged_session_list)`` where
+        ``total_missing`` is the sum of all missing 1-minute slots across all
+        sessions and ``flagged_session_list`` contains ``YYYY-MM-DD`` strings.
+    """
+    if df.empty:
+        return 0, []
+
+    # Convert timestamps to Eastern for session-level analysis
+    ts_et = df["timestamp"].dt.tz_convert(EASTERN_TZ)
+    session_dates = ts_et.dt.date.unique()
+
+    total_missing = 0
+    flagged: list[str] = []
+
+    for date in sorted(session_dates):
+        market_open_et  = pd.Timestamp(date).tz_localize(EASTERN_TZ).replace(hour=9,  minute=30)
+        market_close_et = pd.Timestamp(date).tz_localize(EASTERN_TZ).replace(hour=16, minute=0)
+
+        # All expected 1-minute bar timestamps in this session
+        expected = pd.date_range(
+            start=market_open_et,
+            end=market_close_et,
+            freq="1min",
+        )
+
+        # Actual timestamps in this session (snapped to minute precision)
+        session_mask = ts_et.dt.date == date
+        actual = pd.DatetimeIndex(
+            ts_et[session_mask].dt.floor("1min").values
+        ).tz_localize(None).tz_localize(EASTERN_TZ)
+
+        if len(actual) == 0:
+            continue
+
+        # Restrict the expected window to [first_actual, last_actual] so that
+        # truncated partial datasets (e.g., early feed cut-off) don't generate
+        # false trailing-gap flags.  True intraday gaps still surface because
+        # the window covers the span of actual data.
+        windowed_expected = pd.date_range(
+            start=max(market_open_et, actual.min()),
+            end=min(market_close_et, actual.max()),
+            freq="1min",
+        )
+
+        missing_slots = windowed_expected.difference(actual)
+        n_missing = len(missing_slots)
+        total_missing += n_missing
+
+        if n_missing == 0:
+            continue
+
+        # Check for contiguous runs of missing minutes > threshold
+        if n_missing <= _MAJOR_GAP_MINUTES:
+            logger.debug(
+                "Session %s: %d missing 1-min slot(s) (minor gap).", date, n_missing
+            )
+            continue
+
+        # Detect the longest run of consecutive missing minutes
+        diff_minutes = (
+            pd.Series(missing_slots.sort_values())
+            .diff()
+            .dt.total_seconds()
+            .div(60)
+            .fillna(1)
+        )
+        # A contiguous run means diff == 1 for consecutive missing slots
+        run_lengths: list[int] = []
+        current_run = 1
+        for d in diff_minutes.iloc[1:]:
+            if d == 1:
+                current_run += 1
+            else:
+                run_lengths.append(current_run)
+                current_run = 1
+        run_lengths.append(current_run)
+
+        max_run = max(run_lengths) if run_lengths else 0
+        date_str = date.strftime("%Y-%m-%d")
+        if max_run > _MAJOR_GAP_MINUTES:
+            flagged.append(date_str)
+            logger.warning(
+                "Session %s: major gap detected — max consecutive missing bars: %d.",
+                date_str, max_run,
+            )
+        else:
+            logger.debug(
+                "Session %s: %d missing slots (max run=%d ≤ %d, minor).",
+                date_str, n_missing, max_run, _MAJOR_GAP_MINUTES,
+            )
+
+    return total_missing, flagged
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def validate_and_clean_bars(
+    df: pd.DataFrame,
+    strict: bool = False,
+) -> Tuple[pd.DataFrame, ValidationReport]:
+    """Validate and clean a raw 1-minute OHLCV bar DataFrame.
+
+    Executes the full cleaning pipeline in a deterministic order:
+    schema check → sort → deduplicate → NaN/Inf purge → OHLC geometry →
+    gap audit → strict-mode gate.
+
+    Args:
+        df: Raw bar DataFrame.  Must contain at minimum
+            ``["timestamp", "open", "high", "low", "close", "volume"]``.
+            The ``timestamp`` column must be timezone-aware.
+        strict: When ``True``, raises :class:`DataValidationError` if the
+            fraction of OHLC-invalid bars exceeds 1 % of the input.
+
+    Returns:
+        A 2-tuple ``(clean_df, report)`` where:
+
+        * ``clean_df`` — cleaned, chronologically sorted DataFrame.
+        * ``report`` — :class:`ValidationReport` with audit metrics.
+
+    Raises:
+        DataValidationError: If required columns are missing, or if
+            ``strict=True`` and OHLC error rate > 1 %.
+    """
+    logger.info("Validating %d input bars.", len(df))
+    n_input = len(df)
+
+    # 1. Schema check
+    _check_required_columns(df)
+
+    # 2. Sort chronologically
+    df_work = _sort_chronologically(df)
+
+    # 3. Remove duplicates
+    df_work, n_dups = _remove_duplicates(df_work)
+    if n_dups:
+        logger.info("Removed %d duplicate timestamp(s).", n_dups)
+
+    # 4. Purge NaN / Inf
+    df_work, n_nan_inf = _remove_nan_inf(df_work)
+    if n_nan_inf:
+        logger.warning("Dropped %d bar(s) containing NaN/Inf values.", n_nan_inf)
+
+    # 5. OHLC geometric validation
+    df_work, n_ohlc_invalid = _validate_ohlc_geometry(df_work)
+
+    # Count total invalid removals (NaN/Inf + OHLC geometry)
+    n_invalid_total = n_nan_inf + n_ohlc_invalid
+
+    # 6. Strict-mode gate: >1% OHLC errors → raise
+    if strict and n_input > 0:
+        error_rate = n_invalid_total / n_input
+        if error_rate > _OHLC_ERROR_THRESHOLD:
+            raise DataValidationError(
+                f"OHLC error rate {error_rate:.2%} exceeds 1% threshold "
+                f"({n_invalid_total} of {n_input} bars invalid).",
+                column="ohlc",
+            )
+
+    # 7. Gap audit (RTH only)
+    n_missing, flagged_sessions = _audit_rth_gaps(df_work)
+
+    is_valid = len(flagged_sessions) == 0 and (
+        n_input == 0 or (n_invalid_total / max(n_input, 1)) <= _OHLC_ERROR_THRESHOLD
+    )
+
+    report = ValidationReport(
+        total_bars_input=n_input,
+        total_bars_output=len(df_work),
+        duplicates_removed=n_dups,
+        invalid_ohlc_removed=n_invalid_total,
+        missing_timestamps_count=n_missing,
+        flagged_sessions=flagged_sessions,
+        is_valid=is_valid,
+    )
+
+    logger.info(report.summary())
+    return df_work, report
