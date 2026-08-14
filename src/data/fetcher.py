@@ -141,7 +141,8 @@ def _find_covering_cache_file(
         if dates is None:
             continue
         file_start, file_end = dates
-        if file_start <= start_date and file_end >= end_date:
+        # Compare at date boundary level (inclusive date coverage)
+        if file_start.date() <= start_date.date() and file_end.date() >= end_date.date():
             return candidate
     return None
 
