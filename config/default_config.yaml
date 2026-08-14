@@ -1,0 +1,39 @@
+# Default Configuration for SPY Opening Range Breakout (ORB)
+schema_version: "1.0"
+
+strategy:
+  ticker: "SPY"
+  opening_range_minutes: 15     # 9:30 - 9:45 AM ET
+  target_r: 2.0                 # 2R profit target
+  breakout_buffer_pct: 0.0      # 0% buffer beyond range
+  breakout_confirmation: "close"# "close" or "intrabar"
+  max_trades_per_day: 1         # Max 1 trade per session
+  force_exit_time: "15:59:00"   # Hard EOD close before 16:00 ET
+  stop_method: "opposite_range" # "opposite_range" or "atr"
+  direction_mode: "both"        # "long_only", "short_only", "both"
+
+filters:
+  rvol_filter_enabled: false
+  rvol_threshold: 1.5
+  vwap_filter_enabled: false
+  market_regime_filter_enabled: false
+
+data:
+  symbol: "SPY"
+  feed: "iex"                   # "iex" or "sip"
+  timeframe: "1Min"
+  timezone: "America/New_York"
+  raw_dir: "data/raw/SPY"
+  processed_dir: "data/processed/SPY"
+
+execution:
+  initial_capital: 100000.0
+  position_sizing: "fixed_risk" # "fixed_risk" or "fixed_shares"
+  risk_per_trade_pct: 0.01      # 1% equity risk per trade
+  fixed_shares: 100
+  slippage_per_share: 0.01      # $0.01/share estimated slippage
+  commission_per_share: 0.0035  # $0.0035/share standard broker commission
+
+output:
+  results_dir: "results/backtest"
+  plots_dir: "plots"
