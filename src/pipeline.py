@@ -181,7 +181,7 @@ class ORBPipeline:
         if raw_df.empty:
             raise RuntimeError("No historical bars retrieved. Pipeline aborted.")
         logger.info("Raw bars available: %d", len(raw_df))
-        candlestick_plots = data_plotter.plot_all_sessions(
+        raw_candlestick_plots = data_plotter.plot_all_sessions(
             df=raw_df.tail(int(len(raw_df) * 0.2)),
             symbol=self.config.strategy.ticker,
             max_plots=20,
@@ -212,6 +212,11 @@ class ORBPipeline:
             "Processed dataset ready: %d bars across %d session(s).",
             len(processed_df),
             processed_df["session_id"].nunique(),
+        )
+        processed_candlestick_plots = data_plotter.plot_all_sessions(
+            df=processed_df.tail(int(len(processed_df) * 0.2)),
+            symbol=self.config.strategy.ticker,
+            max_plots=20,
         )
 
         # ── Step 4: Event-Driven Backtest Simulation ──────────────────
