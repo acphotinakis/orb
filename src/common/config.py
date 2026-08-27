@@ -22,16 +22,17 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Union
+from src.common.logger import get_logger
 
-import yaml
+import yaml                                                                                                                                                                               
 
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Domain exception — imported from canonical hierarchy (TASK-004).
 # ---------------------------------------------------------------------------
 
 from src.common.exceptions import ConfigurationError  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Sub-config dataclasses — all frozen to prevent accidental mutation during
@@ -105,7 +106,7 @@ class DataConfig:
         feed: Alpaca market-data feed.  ``"iex"`` (free tier default) or
             ``"sip"`` (paid unlimited plan).
         timeframe: Bar resolution string expected by Alpaca.  Must be
-            ``"1Min"``.
+            valid time frame.
         timezone: IANA timezone name used for all timestamp normalisation.
             Must be ``"America/New_York"``.
         raw_dir: Relative path for raw Parquet bar cache.
@@ -113,11 +114,12 @@ class DataConfig:
     """
 
     symbol: str = "SPY"
-    feed: str = "iex"
+    feed: str = "sip"
     timeframe: str = "1Min"
     timezone: str = "America/New_York"
     raw_dir: str = "data/raw/SPY"
     processed_dir: str = "data/processed/SPY"
+    plots_dir: str = "data/plots/SPY"
 
 
 @dataclass(frozen=True)
@@ -188,6 +190,7 @@ class AppConfig:
             Nested dictionary representation suitable for JSON serialisation.
         """
         import dataclasses as dc
+
         return dc.asdict(self)
 
 
@@ -197,6 +200,41 @@ class AppConfig:
 
 _TIME_RE = re.compile(r"^\d{2}:\d{2}:\d{2}$")
 
+# ---------------------------------------------------------------------------
+# Timeframe definitions & validation                                                                                                                                             
+# ---------------------------------------------------------------------------                                                                                                    
+                                                                                                                                                                                    
+# Common / standard timeframe options for CLI presets & documentation                                                                                                            
+COMMON_TIMEFRAMES: tuple[str, ...] = (                                                                                                                                           
+    "1Min", "5Min", "15Min", "30Min",                                                                                                                                            
+    "1Hour", "2Hour", "4Hour",                                                                                                                                                   
+    "1Day", "1Week", "1Month",                                                                                                                                                   
+)                                                                                                                                                                                
+
+# Regex matching Alpaca timeframe specification:
+# - [1-59]Min or [1-59]T                                                                                                                                                         
+# - [1-23]Hour or [1-23]H                                                                                                                                                        
+# - 1Day or 1D / 1Week or 1W                                                                                                                                                     
+# - [1,2,3,4,6,12]Month or [1,2,3,4,6,12]M                                                                                                                                       
+TIMEFRAME_REGEX = re.compile(                                                                                                                                                    
+    r"^("                                                                                                                                                                        
+    r"([1-5]?[0-9])(Min|min|T)|"                                                                                                                                                 
+    r"(1?[0-9]|2[0-3])(Hour|hour|H)|"                                                                                                                                            
+    r"1(Day|day|D)|"                                                                                                                                                             
+    r"1(Week|week|W)|"                                                                                                                                                           
+    r"(1|2|3|4|6|12)(Month|month|M)"                                                                                                                                             
+    r")$"                                                                                                                                                                        
+)
+
+def is_valid_timeframe(tf: str) -> bool:
+    """Return True if string matches Alpaca's timeframe specification."""                                                                                                        
+    if not isinstance(tf, str):                                                                                                                                                  
+        return False                                                                                                                                                             
+    match = TIMEFRAME_REGEX.match(tf.strip())                                                                                                                                    
+    if not match:                                                                                                                                                                
+        return False                                                                                                                                                             
+    # Ensure minute values are between 1 and 59, hour between 1 and 23                                                                                                           
+    return True                                                                                                                                                                  
 
 def validate_config(config: AppConfig) -> None:
     """Validate all domain constraints on a loaded ``AppConfig``.
@@ -217,12 +255,6 @@ def validate_config(config: AppConfig) -> None:
     # ------------------------------------------------------------------
     # strategy section
     # ------------------------------------------------------------------
-    if s.ticker != "SPY":
-        raise ConfigurationError(
-            f"Baseline v1 supports ticker 'SPY' only; got '{s.ticker}'.",
-            field="strategy.ticker",
-        )
-
     if s.opening_range_minutes <= 0:
         raise ConfigurationError(
             f"opening_range_minutes must be > 0; got {s.opening_range_minutes}.",
@@ -284,11 +316,12 @@ def validate_config(config: AppConfig) -> None:
             field="data.timezone",
         )
 
-    if d.timeframe != "1Min":
+    if not is_valid_timeframe(d.timeframe):
         raise ConfigurationError(
-            f"timeframe must be '1Min'; got '{d.timeframe}'.",
+            f"Invalid timeframe '{d.timeframe}'. Must match Alpaca format: "
+            f"[1-59]Min/T, [1-23]Hour/H, 1Day/D, 1Week/W, or [1,2,3,4,6,12]Month/M.",
             field="data.timeframe",
-        )
+        )                                                                                                                                                                        
 
     if d.feed not in {"iex", "sip"}:
         raise ConfigurationError(
@@ -336,6 +369,10 @@ def validate_config(config: AppConfig) -> None:
             field="execution.position_sizing",
         )
 
+    import json 
+    from dataclasses import asdict
+    config_json = json.dumps(asdict(config), default=str)                                                                                                                            
+    logger.info(f"Config: {config_json}")                                                                                                                                            
 
 # ---------------------------------------------------------------------------
 # Private YAML → dataclass mapping helpers
@@ -366,9 +403,7 @@ def _build_strategy(raw: Dict[str, Any]) -> StrategyConfig:
         max_trades_per_day=int(
             raw.get("max_trades_per_day", defaults.max_trades_per_day)
         ),
-        force_exit_time=str(
-            raw.get("force_exit_time", defaults.force_exit_time)
-        ),
+        force_exit_time=str(raw.get("force_exit_time", defaults.force_exit_time)),
         stop_method=str(raw.get("stop_method", defaults.stop_method)),
         direction_mode=str(raw.get("direction_mode", defaults.direction_mode)),
     )
@@ -388,9 +423,7 @@ def _build_filters(raw: Dict[str, Any]) -> FiltersConfig:
         rvol_filter_enabled=bool(
             raw.get("rvol_filter_enabled", defaults.rvol_filter_enabled)
         ),
-        rvol_threshold=float(
-            raw.get("rvol_threshold", defaults.rvol_threshold)
-        ),
+        rvol_threshold=float(raw.get("rvol_threshold", defaults.rvol_threshold)),
         vwap_filter_enabled=bool(
             raw.get("vwap_filter_enabled", defaults.vwap_filter_enabled)
         ),
@@ -404,23 +437,32 @@ def _build_filters(raw: Dict[str, Any]) -> FiltersConfig:
 
 
 def _build_data(raw: Dict[str, Any]) -> DataConfig:
-    """Construct a :class:`DataConfig` from a raw YAML mapping.
-
-    Args:
-        raw: The ``data:`` sub-dict from the loaded YAML.
-
-    Returns:
-        Populated :class:`DataConfig` instance.
-    """
-    defaults = DataConfig()
-    return DataConfig(
-        symbol=str(raw.get("symbol", defaults.symbol)),
-        feed=str(raw.get("feed", defaults.feed)),
-        timeframe=str(raw.get("timeframe", defaults.timeframe)),
-        timezone=str(raw.get("timezone", defaults.timezone)),
-        raw_dir=str(raw.get("raw_dir", defaults.raw_dir)),
-        processed_dir=str(raw.get("processed_dir", defaults.processed_dir)),
-    )
+    """Construct a :class:`DataConfig` from a raw YAML mapping.                                                                                                                  
+                                                                                                                                                                                    
+    Args:                                                                                                                                                                        
+        raw: The ``data:`` sub-dict from the loaded YAML.                                                                                                                        
+                                                                                                                                                                                    
+    Returns:                                                                                                                                                                     
+        Populated :class:`DataConfig` instance.                                                                                                                                  
+    """                                                                                                                                                                          
+    defaults = DataConfig()                                                                                                                                                      
+    symbol = str(raw.get("symbol", defaults.symbol))                                                                                                                             
+    timeframe = str(raw.get("timeframe", defaults.timeframe))                                                                                                                    
+                                                                                                                                                                                    
+    # Construct default directories based on symbol and timeframe                                                                                                                
+    default_raw_dir = str(raw.get("raw_dir", f"data/raw/{symbol}_{timeframe}"))                                                                                                  
+    default_processed_dir = str(raw.get("processed_dir", f"data/processed/{symbol}_{timeframe}"))     
+    default_plots_dir = str(raw.get("plots_dir", f"data/plots/{symbol}_{timeframe}"))                                                                                
+                                                                                                                                                                                    
+    return DataConfig(                                                                                                                                                           
+        symbol=symbol,                                                                                                                                                           
+        feed=str(raw.get("feed", defaults.feed)),                                                                                                                                
+        timeframe=timeframe,                                                                                                                                                     
+        timezone=str(raw.get("timezone", defaults.timezone)),                                                                                                                    
+        raw_dir=default_raw_dir,                                                                                                                                                 
+        processed_dir=default_processed_dir,         
+        plots_dir=default_plots_dir                                                                                                                             
+    )                                                                                                                                                                            
 
 
 def _build_execution(raw: Dict[str, Any]) -> ExecutionConfig:
@@ -434,12 +476,8 @@ def _build_execution(raw: Dict[str, Any]) -> ExecutionConfig:
     """
     defaults = ExecutionConfig()
     return ExecutionConfig(
-        initial_capital=float(
-            raw.get("initial_capital", defaults.initial_capital)
-        ),
-        position_sizing=str(
-            raw.get("position_sizing", defaults.position_sizing)
-        ),
+        initial_capital=float(raw.get("initial_capital", defaults.initial_capital)),
+        position_sizing=str(raw.get("position_sizing", defaults.position_sizing)),
         risk_per_trade_pct=float(
             raw.get("risk_per_trade_pct", defaults.risk_per_trade_pct)
         ),
@@ -472,6 +510,7 @@ def _build_output(raw: Dict[str, Any]) -> OutputConfig:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def load_config(
     config_path: Union[str, Path] = "config/default_config.yaml",
@@ -523,5 +562,4 @@ def load_config(
         output=_build_output(raw.get("output", {})),
     )
 
-    validate_config(config)
     return config

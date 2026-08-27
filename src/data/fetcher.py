@@ -18,7 +18,7 @@ Cache File Naming
 -----------------
 Files are written to::
 
-    data/raw/{symbol}/{symbol}_1min_{YYYYMMDD}_{YYYYMMDD}.parquet
+    data/raw/{symbol}/{symbol}_{timeframe}_{YYYYMMDD}_{YYYYMMDD}.parquet
 
 where the two dates are the ISO start and end of the *actual downloaded*
 data range (from the earliest to the latest timestamp in the file, not the
@@ -51,7 +51,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
+import sys
 
 import pandas as pd
 
@@ -66,16 +67,24 @@ logger = get_logger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_PARQUET_ENGINE: str = "pyarrow"
-_CACHE_FILENAME_TEMPLATE: str = "{symbol}_1min_{start}_{end}.parquet"
-_OHLCV_REQUIRED_COLS: list[str] = ["timestamp", "open", "high", "low", "close", "volume"]
+_PARQUET_ENGINE: Literal["pyarrow", "fastparquet", "auto"] = "pyarrow"
+_CACHE_FILENAME_TEMPLATE: str = "{symbol}_{timeframe}_{start}_{end}.parquet"
+_OHLCV_REQUIRED_COLS: list[str] = [
+    "timestamp",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+]
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _cache_filename(symbol: str, start: datetime, end: datetime) -> str:
+
+def _cache_filename(symbol: str, timeframe: str, start: datetime, end: datetime) -> str:
     """Return the deterministic Parquet filename for a ``(symbol, start, end)`` window.
 
     Args:
@@ -88,6 +97,7 @@ def _cache_filename(symbol: str, start: datetime, end: datetime) -> str:
     """
     return _CACHE_FILENAME_TEMPLATE.format(
         symbol=symbol.upper(),
+        timeframe=timeframe.upper(),
         start=start.strftime("%Y%m%d"),
         end=end.strftime("%Y%m%d"),
     )
@@ -108,7 +118,7 @@ def _parse_cache_dates(filename: str) -> tuple[datetime, datetime] | None:
         return None
     try:
         start = datetime.strptime(match.group(1), "%Y%m%d").replace(tzinfo=timezone.utc)
-        end   = datetime.strptime(match.group(2), "%Y%m%d").replace(tzinfo=timezone.utc)
+        end = datetime.strptime(match.group(2), "%Y%m%d").replace(tzinfo=timezone.utc)
         return start, end
     except ValueError:
         return None
@@ -117,6 +127,7 @@ def _parse_cache_dates(filename: str) -> tuple[datetime, datetime] | None:
 def _find_covering_cache_file(
     cache_dir: Path,
     symbol: str,
+    timeframe: str,
     start_date: datetime,
     end_date: datetime,
 ) -> Optional[Path]:
@@ -128,13 +139,14 @@ def _find_covering_cache_file(
     Args:
         cache_dir: Directory to search.
         symbol: Ticker symbol used as filename prefix.
+        timeframe: Timeframe of the stock data
         start_date: Requested window start (UTC-aware).
         end_date: Requested window end (UTC-aware).
 
     Returns:
         Path to the first matching file, or ``None`` if no covering cache exists.
     """
-    pattern = f"{symbol.upper()}_1min_*.parquet"
+    pattern = f"{symbol.upper()}_{timeframe}_*.parquet"
     candidates = sorted(cache_dir.glob(pattern))
     for candidate in candidates:
         dates = _parse_cache_dates(candidate.name)
@@ -142,7 +154,10 @@ def _find_covering_cache_file(
             continue
         file_start, file_end = dates
         # Compare at date boundary level (inclusive date coverage)
-        if file_start.date() <= start_date.date() and file_end.date() >= end_date.date():
+        if (
+            file_start.date() <= start_date.date()
+            and file_end.date() >= end_date.date()
+        ):
             return candidate
     return None
 
@@ -160,13 +175,11 @@ def _load_parquet(path: Path) -> pd.DataFrame:
         DataFetchError: If the file cannot be read.
     """
     try:
-        df = pd.read_parquet(path, engine=_PARQUET_ENGINE)
+        df = pd.read_parquet(path, engine=_PARQUET_ENGINE) # type: ignore
         logger.debug("Loaded %d bars from cache: %s", len(df), path.name)
         return df
     except Exception as exc:
-        raise DataFetchError(
-            f"Failed to read cache file '{path}': {exc}"
-        ) from exc
+        raise DataFetchError(f"Failed to read cache file '{path}': {exc}") from exc
 
 
 def _write_parquet(df: pd.DataFrame, path: Path) -> None:
@@ -184,9 +197,7 @@ def _write_parquet(df: pd.DataFrame, path: Path) -> None:
         df.to_parquet(path, engine=_PARQUET_ENGINE, index=False)
         logger.debug("Cached %d bars → %s", len(df), path.name)
     except Exception as exc:
-        raise DataFetchError(
-            f"Failed to write cache file '{path}': {exc}"
-        ) from exc
+        raise DataFetchError(f"Failed to write cache file '{path}': {exc}") from exc
 
 
 def _merge_and_deduplicate(frames: list[pd.DataFrame]) -> pd.DataFrame:
@@ -225,6 +236,7 @@ def _validate_columns(df: pd.DataFrame, context: str) -> None:
 # Public class
 # ---------------------------------------------------------------------------
 
+
 class DataFetcher:
     """High-level raw data ingestion pipeline with Parquet disk caching.
 
@@ -246,7 +258,7 @@ class DataFetcher:
     ) -> None:
         self._config = config
         self._client: Optional[AlpacaDataClient] = client
-        self._cache_dir = Path(config.data.raw_dir)
+        self._cache_dir = Path(config.data.raw_dir)                                                                                        
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -295,9 +307,11 @@ class DataFetcher:
     def fetch_and_cache(
         self,
         symbol: str = "SPY",
+        timeframe: str= "15Min",
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         force_refresh: bool = False,
+        plot_chart: bool = False,
     ) -> pd.DataFrame:
         """Retrieve 1-minute bars, using disk cache when available.
 
@@ -310,6 +324,7 @@ class DataFetcher:
 
         Args:
             symbol: Ticker symbol.  Defaults to ``"SPY"``.
+            timeframe: timeframe of the data. Defaults to ``"15Min"``.
             start_date: Inclusive start datetime (UTC or naive-UTC).
                 Defaults to 365 days before *end_date*.
             end_date: Exclusive end datetime (UTC or naive-UTC).
@@ -347,12 +362,13 @@ class DataFetcher:
         # ── Cache lookup ─────────────────────────────────────────────
         if not force_refresh:
             covering = _find_covering_cache_file(
-                cache_dir, symbol, start_date, end_date
+                cache_dir, symbol, timeframe, start_date, end_date
             )
             if covering is not None:
                 logger.info(
-                    "Cache hit for %s [%s → %s] — loading from %s",
+                    "Cache hit for %s %s [%s → %s] — loading from %s",
                     symbol,
+                    timeframe,
                     start_date.strftime("%Y-%m-%d"),
                     end_date.strftime("%Y-%m-%d"),
                     covering.name,
@@ -364,7 +380,8 @@ class DataFetcher:
                 df = df.loc[mask].reset_index(drop=True)
                 logger.info(
                     "Cache loaded: %d bars for %s [%s → %s].",
-                    len(df), symbol,
+                    len(df),
+                    symbol,
                     df["timestamp"].min() if not df.empty else "N/A",
                     df["timestamp"].max() if not df.empty else "N/A",
                 )
@@ -407,27 +424,33 @@ class DataFetcher:
                 frames_to_merge.append(cached_df)
                 logger.debug(
                     "Merging %d cached bars from %s with fresh data.",
-                    len(cached_df), existing.name,
+                    len(cached_df),
+                    existing.name,
                 )
                 # Remove old file — will be replaced by consolidated write
                 existing.unlink()
             except DataFetchError:
-                logger.warning("Could not read existing cache file %s; skipping.", existing.name)
+                logger.warning(
+                    "Could not read existing cache file %s; skipping.", existing.name
+                )
 
         consolidated = _merge_and_deduplicate(frames_to_merge)
 
         # ── Persist consolidated result ──────────────────────────────
         actual_start = consolidated["timestamp"].min()
-        actual_end   = consolidated["timestamp"].max()
-        fname = _cache_filename(symbol, actual_start, actual_end)
+        actual_end = consolidated["timestamp"].max()
+        fname = _cache_filename(symbol, timeframe, actual_start, actual_end)
         out_path = cache_dir / fname
 
         _write_parquet(consolidated, out_path)
 
         logger.info(
             "Cached %d bars for %s → %s (range: %s → %s).",
-            len(consolidated), symbol, fname,
-            actual_start, actual_end,
+            len(consolidated),
+            symbol,
+            fname,
+            actual_start,
+            actual_end,
         )
 
         # Trim to requested window before returning
@@ -454,13 +477,17 @@ class DataFetcher:
         symbol = symbol.upper()
         files = sorted(self._cache_dir.glob(f"{symbol}_1min_*.parquet"))
         if not files:
-            logger.warning("No cached files found for %s in %s.", symbol, self._cache_dir)
+            logger.warning(
+                "No cached files found for %s in %s.", symbol, self._cache_dir
+            )
             return pd.DataFrame()
 
         frames = [_load_parquet(f) for f in files]
         merged = _merge_and_deduplicate(frames)
         logger.info(
             "Loaded %d total cached bars for %s from %d file(s).",
-            len(merged), symbol, len(files),
+            len(merged),
+            symbol,
+            len(files),
         )
         return merged

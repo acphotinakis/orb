@@ -57,7 +57,7 @@ import os
 import time
 from datetime import datetime, timezone
 from typing import Optional
-
+import re
 import pandas as pd
 from dotenv import load_dotenv
 
@@ -96,38 +96,34 @@ _MAX_RETRIES: int = 3
 _BACKOFF_BASE_SECONDS: float = 2.0  # wait = base ^ attempt  (2, 4, 8 seconds)
 
 
-def _get_timeframe(timeframe_str: str) -> object:
-    """Map a timeframe string to the corresponding ``alpaca-py`` ``TimeFrame``.
+def _get_timeframe(timeframe_str: str) -> TimeFrame:
+    """Convert any supported Alpaca timeframe string to a TimeFrame object."""                                                                                                   
+    tf = timeframe_str.strip()                                                                                                                                                   
+                                                                                                                                                                                    
+    # Minute                                                                                                                                                                     
+    m = re.match(r"^(\d+)(Min|min|T)$", tf)                                                                                                                                      
+    if m:                                                                                                                                                                        
+        return TimeFrame(int(m.group(1)), TimeFrameUnit.Minute)
+    
+    # Hour
+    m = re.match(r"^(\d+)(Hour|hour|H)$", tf)
+    if m:
+        return TimeFrame(int(m.group(1)), TimeFrameUnit.Hour)
+    
+    # Day
+    if tf in {"1Day", "1day", "1D", "D"}:
+        return TimeFrame.Day
+    
+    # Week
+    if tf in {"1Week", "1week", "1W", "W"}:
+        return TimeFrame.Week
+        
+    # Month
+    m = re.match(r"^(\d+)(Month|month|M)$", tf)
+    if m:
+        return TimeFrame(int(m.group(1)), TimeFrameUnit.Month)
 
-    Args:
-        timeframe_str: Timeframe identifier, e.g. ``"1Min"``.
-
-    Returns:
-        The matching ``alpaca.data.timeframe.TimeFrame`` instance.
-
-    Raises:
-        ValueError: If *timeframe_str* is not supported.
-    """
-    if not _ALPACA_AVAILABLE:
-        raise ImportError(
-            "alpaca-py is not installed. Run: pip install alpaca-py"
-        )
-
-    mapping = {
-        "1Min": TimeFrame.Minute,
-        "1min": TimeFrame.Minute,
-        "1m":   TimeFrame.Minute,
-        "5Min": TimeFrame(5, TimeFrameUnit.Minute),
-        "15Min": TimeFrame(15, TimeFrameUnit.Minute),
-        "1H":   TimeFrame.Hour,
-        "1D":   TimeFrame.Day,
-    }
-    if timeframe_str not in mapping:
-        raise ValueError(
-            f"Unsupported timeframe '{timeframe_str}'. "
-            f"Supported: {list(mapping.keys())}"
-        )
-    return mapping[timeframe_str]
+    raise ValueError(f"Unsupported timeframe format: '{timeframe_str}'")
 
 
 def _get_feed_enum(feed_str: str) -> object:

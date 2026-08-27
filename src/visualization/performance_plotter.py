@@ -22,6 +22,7 @@ import numpy as np
 
 from src.backtest.engine import BacktestResult
 from src.common.logger import get_logger
+from src.common.time_utils import to_eastern, ensure_eastern, EASTERN_TZ
 
 logger = get_logger(__name__)
 
@@ -52,8 +53,8 @@ class PerformancePlotter:
 
         fig, ax = plt.subplots(figsize=(12, 6))
 
-        df = equity_df.copy().sort_values("timestamp").reset_index(drop=True)
-        timestamps = pd.to_datetime(df["timestamp"])
+        df = to_eastern(equity_df, time_col="timestamp").sort_values("timestamp").reset_index(drop=True)
+        timestamps = df["timestamp"]
         equity = df["equity"].values
         init_cap = equity[0] if len(equity) > 0 else 100_000.0
 
@@ -111,8 +112,8 @@ class PerformancePlotter:
         if equity_df.empty or "equity" not in equity_df.columns:
             return out_path
 
-        df = equity_df.copy().sort_values("timestamp").reset_index(drop=True)
-        timestamps = pd.to_datetime(df["timestamp"])
+        df = to_eastern(equity_df, time_col="timestamp").sort_values("timestamp").reset_index(drop=True)
+        timestamps = df["timestamp"]
         equity = df["equity"].values
 
         hwm = np.maximum.accumulate(equity)
@@ -190,8 +191,10 @@ class PerformancePlotter:
         if trades_df.empty or "entry_time" not in trades_df.columns or "exit_time" not in trades_df.columns:
             return out_path
 
-        entry_t = pd.to_datetime(trades_df["entry_time"])
-        exit_t = pd.to_datetime(trades_df["exit_time"])
+        t_df = to_eastern(trades_df, time_col="entry_time")
+        t_df = to_eastern(t_df, time_col="exit_time")
+        entry_t = t_df["entry_time"]
+        exit_t = t_df["exit_time"]
         durations_mins = (exit_t - entry_t).dt.total_seconds() / 60.0
 
         fig, ax = plt.subplots(figsize=(10, 5))
