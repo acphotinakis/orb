@@ -39,6 +39,7 @@ from __future__ import annotations
 import datetime
 from enum import Enum
 from typing import Tuple
+import re
 
 import pandas as pd
 
@@ -458,3 +459,14 @@ def add_session_id_column(
     df_et = to_eastern(df, time_col=time_col)
     df_et["session_id"] = df_et[time_col].dt.strftime("%Y-%m-%d")
     return df_et
+
+def get_timeframe_minutes(timeframe: str) -> int:
+    """Parse minutes from timeframe string (e.g. '1Min' -> 1, '5Min' -> 5, '1Hour' -> 60)."""
+    tf = timeframe.strip().lower()
+    if "min" in tf or "t" in tf:
+        nums = re.findall(r"\d+", tf)
+        return int(nums[0]) if nums else 1
+    elif "hour" in tf or "h" in tf:
+        nums = re.findall(r"\d+", tf)
+        return int(nums[0]) * 60 if nums else 60
+    return 1

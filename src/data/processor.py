@@ -79,6 +79,7 @@ from src.common.time_utils import (
     EASTERN_TZ,
     filter_rth,
     to_eastern,
+    get_timeframe_minutes,
 )
 
 logger = get_logger(__name__)
@@ -179,28 +180,33 @@ def _add_session_metadata(
 def _prune_incomplete_sessions(
     df: pd.DataFrame,
     or_minutes: int,
+    timeframe_minutes: int = 1,
 ) -> pd.DataFrame:
-    """Remove sessions whose opening range contains fewer than *or_minutes* bars.
+    """Remove sessions whose opening range contains fewer than expected bars.
 
     Sessions with incomplete opening ranges (e.g. half days, late opens,
-    or data gaps during 09:30–09:44) cannot produce valid OR breakout
-    levels and must be excluded to maintain simulation integrity.
+    or data gaps during the opening range window) cannot produce valid OR
+    breakout levels and must be excluded to maintain simulation integrity.
 
     Args:
         df: DataFrame with ``session_id`` and ``is_opening_range`` columns.
-        or_minutes: Expected number of 1-minute bars in the opening range.
+        or_minutes: Expected opening range duration in minutes.
+        timeframe_minutes: Bar duration in minutes.
 
     Returns:
         Filtered DataFrame with incomplete sessions dropped.
     """
+    expected_bars = max(1, or_minutes // timeframe_minutes)
     or_counts = df[df["is_opening_range"]].groupby("session_id").size()
-    complete_sessions = or_counts[or_counts >= or_minutes].index
+    complete_sessions = or_counts[or_counts >= expected_bars].index
     n_pruned = df["session_id"].nunique() - len(complete_sessions)
     if n_pruned > 0:
         logger.warning(
-            "Pruned %d session(s) with incomplete opening ranges (< %d bars).",
+            "Pruned %d session(s) with incomplete opening ranges (< %d bars for %d-min OR at %d-min timeframe).",
             n_pruned,
+            expected_bars,
             or_minutes,
+            timeframe_minutes,
         )
     return df[df["session_id"].isin(complete_sessions)].reset_index(drop=True)
 
@@ -378,7 +384,10 @@ class DataProcessor:
         )
 
         # 5. Prune incomplete sessions
-        df_complete = _prune_incomplete_sessions(df_meta, or_minutes=self._or_minutes)
+        tf_minutes = get_timeframe_minutes(self._config.data.timeframe)
+        df_complete = _prune_incomplete_sessions(
+            df_meta, or_minutes=self._or_minutes, timeframe_minutes=tf_minutes
+        )
 
         # 6. Deduplicate on (session_id, timestamp)
         df_dedup = df_complete.drop_duplicates(

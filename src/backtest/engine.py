@@ -44,7 +44,8 @@ class BacktestEngine:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self.or_calculator = OpeningRangeCalculator(
-            or_minutes=config.strategy.opening_range_minutes
+            or_minutes=config.strategy.opening_range_minutes,
+            timeframe=config.data.timeframe,
         )
         self.signal_generator = SignalGenerator(config=config.strategy)
         self.execution_model = ExecutionModel(config=config.execution)

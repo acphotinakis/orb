@@ -57,7 +57,7 @@ import pandas as pd
 
 from src.common.exceptions import DataValidationError, TemporalLeakageError
 from src.common.logger import get_logger
-from src.common.time_utils import EASTERN_TZ
+from src.common.time_utils import EASTERN_TZ, get_timeframe_minutes
 
 logger = get_logger(__name__)
 
@@ -146,6 +146,8 @@ class OpeningRangeCalculator:
         self,
         or_minutes: int = 15,
         output_dir: Optional[Path] = None,
+        timeframe: Optional[str] = None,
+        timeframe_minutes: int = 1,
     ) -> None:
         if or_minutes <= 0:
             raise ValueError(
@@ -153,6 +155,10 @@ class OpeningRangeCalculator:
             )
         self._or_minutes = or_minutes
         self._output_dir = output_dir
+        if timeframe is not None:
+            self._timeframe_minutes = get_timeframe_minutes(timeframe)
+        else:
+            self._timeframe_minutes = max(1, timeframe_minutes)
 
     # ------------------------------------------------------------------
     # Core single-session calculation
@@ -256,16 +262,17 @@ class OpeningRangeCalculator:
         start_time = or_bars["timestamp"].min()
         end_time = or_bars["timestamp"].max()
 
-        # Validity gate
-        is_valid: bool = (bar_count == self._or_minutes) and (or_width > 0)
+        # Validity gate: dynamic expected bars based on timeframe (e.g. 15 for 1Min, 3 for 5Min)
+        expected_bars = max(1, self._or_minutes // self._timeframe_minutes)
+        is_valid: bool = (bar_count >= expected_bars) and (or_width > 0)
 
         if not is_valid:
             logger.warning(
-                "Session %s: OR invalid — bar_count=%d (expected %d), "
+                "Session %s: OR invalid — bar_count=%d (expected >= %d), "
                 "or_width=%.4f.",
                 session_id,
                 bar_count,
-                self._or_minutes,
+                expected_bars,
                 or_width,
             )
         else:
