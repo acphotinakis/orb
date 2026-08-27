@@ -122,14 +122,7 @@ class PathManager:
         Segregated by feed (``iex`` vs ``sip``) so that delayed and real-time
         data never share the same cache files.
         """
-        p = (
-            self.root_dir
-            / "data"
-            / "raw"
-            / self.symbol
-            / self.feed
-            / self.timeframe
-        )
+        p = self.root_dir / "data" / "raw" / self.symbol / self.feed / self.timeframe
         p.mkdir(parents=True, exist_ok=True)
         return p
 
@@ -213,6 +206,36 @@ class PathManager:
         Path: ``{plots_dir}/candlesticks/``
         """
         p = self.plots_dir / "candlesticks"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def raw_candlestick_plots_dir(self) -> Path:
+        """Raw data candlestick chart directory.
+
+        Path: ``{plots_dir}/candlesticks/raw/``
+        """
+        p = self.candlestick_plots_dir / "raw"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def cleaned_candlestick_plots_dir(self) -> Path:
+        """Cleaned data candlestick chart directory.
+
+        Path: ``{plots_dir}/candlesticks/cleaned/``
+        """
+        p = self.candlestick_plots_dir / "cleaned"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def processed_candlestick_plots_dir(self) -> Path:
+        """Processed session candlestick chart directory.
+
+        Path: ``{plots_dir}/candlesticks/processed/``
+        """
+        p = self.candlestick_plots_dir / "processed"
         p.mkdir(parents=True, exist_ok=True)
         return p
 
@@ -320,6 +343,24 @@ class PathManager:
         """Per-experiment execution log: ``{logs_dir}/execution.log``"""
         return self.logs_dir / "execution.log"
 
+    @property
+    def raw_candlestick_plots_dir(self) -> Path:
+        p = self.plots_dir / "candlesticks" / "raw"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def cleaned_candlestick_plots_dir(self) -> Path:
+        p = self.plots_dir / "candlesticks" / "cleaned"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def processed_candlestick_plots_dir(self) -> Path:
+        p = self.plots_dir / "candlesticks" / "processed"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
     def candlestick_file(self, session_id: str) -> Path:
         """Return the path for a session candlestick chart PNG.
 
@@ -329,7 +370,9 @@ class PathManager:
         Returns:
             Full path within :attr:`candlestick_plots_dir`.
         """
-        return self.candlestick_plots_dir / f"{self.symbol}_candlestick_{session_id}.png"
+        return (
+            self.candlestick_plots_dir / f"{self.symbol}_candlestick_{session_id}.png"
+        )
 
     def trade_chart_file(self, trade_id: int, date: str, direction: str) -> Path:
         """Return the path for a per-trade execution chart PNG.

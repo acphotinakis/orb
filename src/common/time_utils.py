@@ -42,7 +42,6 @@ from typing import Tuple
 
 import pandas as pd
 
-
 # ---------------------------------------------------------------------------
 # Module-level constant
 # ---------------------------------------------------------------------------
@@ -54,6 +53,7 @@ EASTERN_TZ: str = "America/New_York"
 # ---------------------------------------------------------------------------
 # Session phase enum
 # ---------------------------------------------------------------------------
+
 
 class SessionPhase(str, Enum):
     """Discrete intraday phase label for each RTH 1-minute bar.
@@ -81,6 +81,7 @@ class SessionPhase(str, Enum):
 # ---------------------------------------------------------------------------
 # Core timezone helpers
 # ---------------------------------------------------------------------------
+
 
 def ensure_eastern(ts: pd.Timestamp) -> pd.Timestamp:
     """Convert or localise a single ``pd.Timestamp`` to ``America/New_York``.
@@ -178,6 +179,7 @@ def to_eastern(
 # RTH filtering
 # ---------------------------------------------------------------------------
 
+
 def filter_rth(
     df: pd.DataFrame,
     time_col: str = "timestamp",
@@ -218,6 +220,7 @@ def filter_rth(
 # Opening range bar classification
 # ---------------------------------------------------------------------------
 
+
 def is_opening_range_bar(
     timestamp: pd.Timestamp,
     or_minutes: int = 15,
@@ -250,9 +253,7 @@ def is_opening_range_bar(
         assert is_opening_range_bar(ts_out)  is False
     """
     if or_minutes <= 0:
-        raise ValueError(
-            f"or_minutes must be a positive integer; got {or_minutes}."
-        )
+        raise ValueError(f"or_minutes must be a positive integer; got {or_minutes}.")
 
     ts_et = ensure_eastern(timestamp)
     t = ts_et.time()
@@ -267,6 +268,7 @@ def is_opening_range_bar(
 # ---------------------------------------------------------------------------
 # Session phase classifier
 # ---------------------------------------------------------------------------
+
 
 def classify_session_phase(
     timestamp: pd.Timestamp,
@@ -350,6 +352,7 @@ def add_session_phase_column(
 # Session boundary builder
 # ---------------------------------------------------------------------------
 
+
 def get_session_timestamps(
     session_date: datetime.date,
     or_minutes: int = 15,
@@ -390,9 +393,7 @@ def get_session_timestamps(
         # close  → 2024-01-02 16:00:00-05:00
     """
     if or_minutes <= 0:
-        raise ValueError(
-            f"or_minutes must be a positive integer; got {or_minutes}."
-        )
+        raise ValueError(f"or_minutes must be a positive integer; got {or_minutes}.")
 
     parts = force_exit_time.split(":")
     if len(parts) != 3:
@@ -408,9 +409,7 @@ def get_session_timestamps(
     # or_end is the first bar excluded from the OR (trading window begins here)
     or_end = market_open + pd.Timedelta(minutes=or_minutes)
 
-    force_exit = pd.Timestamp(
-        f"{date_str} {fe_h:02d}:{fe_m:02d}:{fe_s:02d}", tz=tz
-    )
+    force_exit = pd.Timestamp(f"{date_str} {fe_h:02d}:{fe_m:02d}:{fe_s:02d}", tz=tz)
 
     market_close = pd.Timestamp(f"{date_str} 16:00:00", tz=tz)
 
@@ -420,6 +419,7 @@ def get_session_timestamps(
 # ---------------------------------------------------------------------------
 # Session ID helper
 # ---------------------------------------------------------------------------
+
 
 def get_session_id(timestamp: pd.Timestamp) -> str:
     """Return the trading date string (``YYYY-MM-DD``) for a bar timestamp.

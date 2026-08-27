@@ -18,6 +18,7 @@ import pandas as pd
 
 class PositionSide(str, Enum):
     """Position side / market orientation."""
+
     FLAT = "FLAT"
     LONG = "LONG"
     SHORT = "SHORT"
@@ -25,6 +26,7 @@ class PositionSide(str, Enum):
 
 class ExitReason(str, Enum):
     """Reason for closing an active position."""
+
     TARGET = "TARGET"
     STOP = "STOP"
     EOD = "EOD"
@@ -62,8 +64,16 @@ class Trade:
             "date": self.date,
             "symbol": self.symbol,
             "direction": self.direction,
-            "entry_time": self.entry_time.isoformat() if hasattr(self.entry_time, "isoformat") else str(self.entry_time),
-            "exit_time": self.exit_time.isoformat() if hasattr(self.exit_time, "isoformat") else str(self.exit_time),
+            "entry_time": (
+                self.entry_time.isoformat()
+                if hasattr(self.entry_time, "isoformat")
+                else str(self.entry_time)
+            ),
+            "exit_time": (
+                self.exit_time.isoformat()
+                if hasattr(self.exit_time, "isoformat")
+                else str(self.exit_time)
+            ),
             "entry_price": round(self.entry_price, 4),
             "exit_price": round(self.exit_price, 4),
             "stop_price": round(self.stop_price, 4),
@@ -122,7 +132,9 @@ class Position:
 
         # Calculate return percentage on capital committed
         invested_capital = self.entry_price * self.shares
-        return_pct = (net_pnl_dollars / invested_capital) if invested_capital > 0 else 0.0
+        return_pct = (
+            (net_pnl_dollars / invested_capital) if invested_capital > 0 else 0.0
+        )
 
         # Calculate realized R-multiple
         if self.initial_risk_per_share > 0:

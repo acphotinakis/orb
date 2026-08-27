@@ -54,14 +54,15 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _REQUIRED_COLS: list[str] = ["timestamp", "open", "high", "low", "close", "volume"]
-_OHLC_ERROR_THRESHOLD: float = 0.01   # 1 % of input bars
-_MARKET_OPEN  = datetime.time(9, 30, 0)
+_OHLC_ERROR_THRESHOLD: float = 0.01  # 1 % of input bars
+_MARKET_OPEN = datetime.time(9, 30, 0)
 _MARKET_CLOSE = datetime.time(16, 0, 0)
 
 
 # ---------------------------------------------------------------------------
 # ValidationReport
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ValidationReport:
@@ -112,20 +113,21 @@ class ValidationReport:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
-def _timeframe_to_pandas_freq(timeframe: str) -> str:                                                                                                                                                                
-    """Normalize Alpaca timeframe string (e.g. 15Min, 1Hour, 1Day) to Pandas offset string."""                                                                                                                       
-    tf = timeframe.strip()                                                                                                                                                                                           
-    if tf.lower().endswith("min") or tf.lower().endswith("t"):                                                                                                                                                       
-        num = re.findall(r"\d+", tf)                                                                                                                                                                                 
-        n = num[0] if num else "1"                                                                                                                                                                                   
-        return f"{n}min"                                                                                                                                                                                             
-    elif tf.lower().endswith("hour") or tf.lower().endswith("h"):                                                                                                                                                    
-        num = re.findall(r"\d+", tf)                                                                                                                                                                                 
-        n = num[0] if num else "1"                                                                                                                                                                                   
-        return f"{n}h"                                                                                                                                                                                               
-    elif tf.lower().endswith("day") or tf.lower().endswith("d"):                                                                                                                                                     
-        return "1D"                                                                                                                                                  
+def _timeframe_to_pandas_freq(timeframe: str) -> str:
+    """Normalize Alpaca timeframe string (e.g. 15Min, 1Hour, 1Day) to Pandas offset string."""
+    tf = timeframe.strip()
+    if tf.lower().endswith("min") or tf.lower().endswith("t"):
+        num = re.findall(r"\d+", tf)
+        n = num[0] if num else "1"
+        return f"{n}min"
+    elif tf.lower().endswith("hour") or tf.lower().endswith("h"):
+        num = re.findall(r"\d+", tf)
+        n = num[0] if num else "1"
+        return f"{n}h"
+    elif tf.lower().endswith("day") or tf.lower().endswith("d"):
+        return "1D"
     return "1min"
+
 
 def _check_required_columns(df: pd.DataFrame) -> None:
     """Assert all required OHLCV columns are present.
@@ -173,9 +175,7 @@ def _remove_duplicates(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
     n_before = len(df)
     # Sort by timestamp then volume desc so that highest-volume bar comes first
     # within each duplicate group, then keep the first (=highest volume).
-    df_sorted = df.sort_values(
-        ["timestamp", "volume"], ascending=[True, False]
-    )
+    df_sorted = df.sort_values(["timestamp", "volume"], ascending=[True, False])
     df_deduped = df_sorted.drop_duplicates(subset=["timestamp"], keep="first")
     # Restore chronological order
     df_deduped = df_deduped.sort_values("timestamp").reset_index(drop=True)
@@ -198,9 +198,7 @@ def _remove_nan_inf(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
 
     # Replace ±Inf with NaN then drop any row that has NaN in numeric columns
     df_clean = df.copy()
-    df_clean[numeric_cols] = df_clean[numeric_cols].replace(
-        [np.inf, -np.inf], np.nan
-    )
+    df_clean[numeric_cols] = df_clean[numeric_cols].replace([np.inf, -np.inf], np.nan)
     df_clean = df_clean.dropna(subset=numeric_cols).reset_index(drop=True)
     return df_clean, n_before - len(df_clean)
 
@@ -223,76 +221,74 @@ def _validate_ohlc_geometry(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
     n_before = len(df)
 
     positive_prices = (
-        (df["open"]  > 0) &
-        (df["high"]  > 0) &
-        (df["low"]   > 0) &
-        (df["close"] > 0)
+        (df["open"] > 0) & (df["high"] > 0) & (df["low"] > 0) & (df["close"] > 0)
     )
     non_negative_volume = df["volume"] >= 0
     high_is_max = df["high"] >= df[["open", "close", "low"]].max(axis=1)
-    low_is_min  = df["low"]  <= df[["open", "close", "high"]].min(axis=1)
+    low_is_min = df["low"] <= df[["open", "close", "high"]].min(axis=1)
 
     valid_mask = positive_prices & non_negative_volume & high_is_max & low_is_min
     n_invalid = (~valid_mask).sum()
 
     if n_invalid > 0:
-        logger.warning(
-            "Dropping %d bar(s) with OHLC geometric violations.", n_invalid
-        )
+        logger.warning("Dropping %d bar(s) with OHLC geometric violations.", n_invalid)
 
     return df.loc[valid_mask].reset_index(drop=True), int(n_invalid)
 
 
 def _audit_rth_gaps(
-    df: pd.DataFrame,                                                                                                                                                                                                
+    df: pd.DataFrame,
     timeframe: str,
-) -> Tuple[int, List[str]]:                                                                                                                                                                                          
-    """Audit RTH bars for missing bar slots and flag sessions with major gaps."""                                                                                                                                    
-    if df.empty:                                                                                                                                                                                                     
-        return 0, []                                                                                                                                                                                                 
-                                                                                                                                                                                                                        
-    freq = _timeframe_to_pandas_freq(timeframe)                                                                                                                                                                      
-    # Convert timestamps to Eastern for session-level analysis                                                                                                                                                       
-    ts_et = df["timestamp"].dt.tz_convert(EASTERN_TZ)                                                                                                                                                                
-    session_dates = ts_et.dt.date.unique()                                                                                                                                                                           
-                                                                                                                                                                                                                        
-    total_missing = 0                                                                                                                                                                                                
-    flagged: list[str] = []                                                                                                                                                                                          
-                                                                                                                                                                                                                        
-    for date in sorted(session_dates):                                                                                                                                                                               
-        market_open_et  = pd.Timestamp(date, tz=EASTERN_TZ).replace(hour=9,  minute=30)                                                                                                                              
-        market_close_et = pd.Timestamp(date, tz=EASTERN_TZ).replace(hour=16, minute=0)                                                                                                                               
-                                                                                                                                                                                                                        
-        # Actual timestamps cleanly preserved in Eastern TZ                                                                                                                                                          
-        session_mask = ts_et.dt.date == date                                                                                                                                                                         
-        actual = pd.DatetimeIndex(ts_et[session_mask].dt.floor(freq))                                                                                                                                                
-                                                                                                                                                                                                                        
-        if len(actual) == 0:                                                                                                                                                                                         
-            continue                                                                                                                                                                                                 
-                                                                                                                                                                                                                        
-        # Window expected range between first and last actual bar of session                                                                                                                                         
-        windowed_expected = pd.date_range(                                                                                                                                                                           
-            start=max(market_open_et, actual.min()),                                                                                                                                                                 
-            end=min(market_close_et, actual.max()),                                                                                                                                                                  
-            freq=freq,                                                                                                                                                                                               
-        )                                                                                                                                                                                                            
-                                                                                                                                                                                                                        
-        missing_slots = windowed_expected.difference(actual)                                                                                                                                                         
-        n_missing = len(missing_slots)                                                                                                                                                                               
-        total_missing += n_missing                                                                                                                                                                                   
-                                                                                                                                                                                                                        
-        # Flag if more than 3 consecutive intervals or > 10% of session bars are missing                                                                                                                             
-        if n_missing > 3:                                                                                                                                                                                            
-            date_str = date.strftime("%Y-%m-%d")                                                                                                                                                                     
-            flagged.append(date_str)                                                                                                                                                                                 
-            logger.warning("Session %s: gap detected — %d missing bar(s).", date_str, n_missing)                                                                                                                     
-                                                                                                                                                                                                                        
-    return total_missing, flagged                                                                                                                                                                                    
+) -> Tuple[int, List[str]]:
+    """Audit RTH bars for missing bar slots and flag sessions with major gaps."""
+    if df.empty:
+        return 0, []
+
+    freq = _timeframe_to_pandas_freq(timeframe)
+    # Convert timestamps to Eastern for session-level analysis
+    ts_et = df["timestamp"].dt.tz_convert(EASTERN_TZ)
+    session_dates = ts_et.dt.date.unique()
+
+    total_missing = 0
+    flagged: list[str] = []
+
+    for date in sorted(session_dates):
+        market_open_et = pd.Timestamp(date, tz=EASTERN_TZ).replace(hour=9, minute=30)
+        market_close_et = pd.Timestamp(date, tz=EASTERN_TZ).replace(hour=16, minute=0)
+
+        # Actual timestamps cleanly preserved in Eastern TZ
+        session_mask = ts_et.dt.date == date
+        actual = pd.DatetimeIndex(ts_et[session_mask].dt.floor(freq))
+
+        if len(actual) == 0:
+            continue
+
+        # Window expected range between first and last actual bar of session
+        windowed_expected = pd.date_range(
+            start=max(market_open_et, actual.min()),
+            end=min(market_close_et, actual.max()),
+            freq=freq,
+        )
+
+        missing_slots = windowed_expected.difference(actual)
+        n_missing = len(missing_slots)
+        total_missing += n_missing
+
+        # Flag if more than 3 consecutive intervals or > 10% of session bars are missing
+        if n_missing > 3:
+            date_str = date.strftime("%Y-%m-%d")
+            flagged.append(date_str)
+            logger.warning(
+                "Session %s: gap detected — %d missing bar(s).", date_str, n_missing
+            )
+
+    return total_missing, flagged
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def validate_and_clean_bars(
     df: pd.DataFrame,

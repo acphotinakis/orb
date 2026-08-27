@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional, Union
 import matplotlib
+
 matplotlib.use("Agg")  # Non-interactive headless backend
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -39,7 +40,9 @@ class CandlestickDataPlotter:
                 Defaults to ``"plots/candlesticks"``.
             filename: Optional default filename stem for saved charts.
         """
-        self.output_dir = Path(output_dir) if output_dir is not None else Path("plots/candlesticks")
+        self.output_dir = (
+            Path(output_dir) if output_dir is not None else Path("plots/candlesticks")
+        )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.filename = filename
 
@@ -70,10 +73,17 @@ class CandlestickDataPlotter:
         required_cols = ["timestamp", "open", "high", "low", "close"]
         for col in required_cols:
             if col not in data.columns:
-                raise ValueError(f"Missing required column '{col}' for candlestick plot.")
+                raise ValueError(
+                    f"Missing required column '{col}' for candlestick plot."
+                )
 
         fig, (ax, ax_vol) = plt.subplots(
-            2, 1, figsize=(14, 8), gridspec_kw={"height_ratios": [3, 1]}, sharex=True, dpi=150
+            2,
+            1,
+            figsize=(14, 8),
+            gridspec_kw={"height_ratios": [3, 1]},
+            sharex=True,
+            dpi=150,
         )
 
         n_bars = len(data)
@@ -87,14 +97,52 @@ class CandlestickDataPlotter:
         down = data[data["close"] < data["open"]]
 
         # Up candles (Bullish - Green)
-        ax.bar(up.index, up["close"] - up["open"], width, bottom=up["open"], color="#26a69a", edgecolor="#26a69a")
-        ax.bar(up.index, up["high"] - up["close"], wick_width, bottom=up["close"], color="#26a69a")
-        ax.bar(up.index, up["low"] - up["open"], wick_width, bottom=up["open"], color="#26a69a")
+        ax.bar(
+            up.index,
+            up["close"] - up["open"],
+            width,
+            bottom=up["open"],
+            color="#26a69a",
+            edgecolor="#26a69a",
+        )
+        ax.bar(
+            up.index,
+            up["high"] - up["close"],
+            wick_width,
+            bottom=up["close"],
+            color="#26a69a",
+        )
+        ax.bar(
+            up.index,
+            up["low"] - up["open"],
+            wick_width,
+            bottom=up["open"],
+            color="#26a69a",
+        )
 
         # Down candles (Bearish - Red)
-        ax.bar(down.index, down["close"] - down["open"], width, bottom=down["open"], color="#ef5350", edgecolor="#ef5350")
-        ax.bar(down.index, down["high"] - down["open"], wick_width, bottom=down["open"], color="#ef5350")
-        ax.bar(down.index, down["low"] - down["close"], wick_width, bottom=down["close"], color="#ef5350")
+        ax.bar(
+            down.index,
+            down["close"] - down["open"],
+            width,
+            bottom=down["open"],
+            color="#ef5350",
+            edgecolor="#ef5350",
+        )
+        ax.bar(
+            down.index,
+            down["high"] - down["open"],
+            wick_width,
+            bottom=down["open"],
+            color="#ef5350",
+        )
+        ax.bar(
+            down.index,
+            down["low"] - down["close"],
+            wick_width,
+            bottom=down["close"],
+            color="#ef5350",
+        )
 
         # Volume bars
         if "volume" in data.columns:
@@ -121,19 +169,31 @@ class CandlestickDataPlotter:
                     label=f"Opening Range ({or_low:.2f} - {or_high:.2f})",
                 )
                 ax.add_patch(rect)
-                ax.axhline(or_high, color="#1976d2", linestyle="--", alpha=0.5, linewidth=0.8)
-                ax.axhline(or_low, color="#1976d2", linestyle="--", alpha=0.5, linewidth=0.8)
+                ax.axhline(
+                    or_high, color="#1976d2", linestyle="--", alpha=0.5, linewidth=0.8
+                )
+                ax.axhline(
+                    or_low, color="#1976d2", linestyle="--", alpha=0.5, linewidth=0.8
+                )
 
         # Chart Title & Labels
         first_ts = data.iloc[0]["timestamp"]
-        session_label = first_ts.strftime("%Y-%m-%d") if hasattr(first_ts, "strftime") else str(first_ts)[:10]
+        session_label = (
+            first_ts.strftime("%Y-%m-%d")
+            if hasattr(first_ts, "strftime")
+            else str(first_ts)[:10]
+        )
         chart_title = title or f"{symbol} Candlesticks — {session_label}"
         ax.set_title(chart_title, fontsize=13, fontweight="bold", pad=12)
         ax.set_ylabel("Price ($)", fontsize=11)
         ax.grid(True, linestyle=":", alpha=0.4)
         ax_vol.grid(True, linestyle=":", alpha=0.4)
 
-        if highlight_opening_range and "is_opening_range" in data.columns and not data[data["is_opening_range"] == True].empty:
+        if (
+            highlight_opening_range
+            and "is_opening_range" in data.columns
+            and not data[data["is_opening_range"] == True].empty
+        ):
             ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
 
         # Format X-ticks with timestamp labels
@@ -145,7 +205,9 @@ class CandlestickDataPlotter:
         def _fmt_ts(val: object) -> str:
             if hasattr(val, "strftime"):
                 # If intraday, display HH:MM; if multi-day, display YYYY-MM-DD
-                return val.strftime("%H:%M") if n_bars <= 390 else val.strftime("%Y-%m-%d")
+                return (
+                    val.strftime("%H:%M") if n_bars <= 390 else val.strftime("%Y-%m-%d")
+                )
             return str(val)
 
         tick_labels = [_fmt_ts(data.iloc[i]["timestamp"]) for i in tick_indices]
@@ -168,6 +230,7 @@ class CandlestickDataPlotter:
     def plot_all_sessions(
         self,
         df: pd.DataFrame,
+        stage: str,  # e.g., "raw", "cleaned", or "processed"
         symbol: str = "SPY",
         max_plots: Optional[int] = None,
     ) -> List[Path]:
@@ -183,8 +246,13 @@ class CandlestickDataPlotter:
         """
         output_paths: List[Path] = []
         if "session_id" not in df.columns:
-            # If no session_id, plot as one single series
-            p = self.plot_session(df, symbol=symbol)
+            # For raw bars where session_id hasn't been tagged yet
+            p = self.plot_session(
+                df,
+                symbol=symbol,
+                title=f"{symbol} [{stage.upper()}] Candlesticks",
+                filename=f"{symbol}_{stage}_candlesticks.png",
+            )
             return [p]
 
         grouped = df.groupby("session_id")
@@ -197,7 +265,8 @@ class CandlestickDataPlotter:
             p = self.plot_session(
                 session_df,
                 symbol=symbol,
-                filename=f"{symbol}_candlestick_{s_id}.png",
+                title=f"{symbol} [{stage.upper()}] — {s_id}",
+                filename=f"{symbol}_{stage}_candlestick_{s_id}.png",
             )
             output_paths.append(p)
 

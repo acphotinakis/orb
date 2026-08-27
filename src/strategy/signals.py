@@ -89,7 +89,9 @@ class SignalGenerator:
         # Filter strictly to trading window bars
         # Note: TASK-008 tagged `is_trading_window` True for [09:45, 15:59)
         if "is_trading_window" in session_bars.columns:
-            trading_bars = session_bars[session_bars["is_trading_window"] == True].copy()
+            trading_bars = session_bars[
+                session_bars["is_trading_window"] == True
+            ].copy()
         else:
             # Fallback based on minute_of_day if is_trading_window not present
             or_mins = self._config.opening_range_minutes
@@ -119,9 +121,8 @@ class SignalGenerator:
             ts = pd.Timestamp(row["timestamp"])
 
             # Long breakout check
-            if (
-                self._config.direction_mode in ("both", "long_only")
-                and close_price > (or_high + buffer_val)
+            if self._config.direction_mode in ("both", "long_only") and close_price > (
+                or_high + buffer_val
             ):
                 stop_loss = or_low
                 risk_amount = close_price - stop_loss
@@ -146,10 +147,10 @@ class SignalGenerator:
                 return signal
 
             # Short breakout check
-            elif (
-                self._config.direction_mode in ("both", "short_only")
-                and close_price < (or_low - buffer_val)
-            ):
+            elif self._config.direction_mode in (
+                "both",
+                "short_only",
+            ) and close_price < (or_low - buffer_val):
                 stop_loss = or_high
                 risk_amount = stop_loss - close_price
                 if risk_amount <= 0:

@@ -38,10 +38,10 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-
 # ---------------------------------------------------------------------------
 # Base
 # ---------------------------------------------------------------------------
+
 
 class ORBBaseException(Exception):
     """Base exception for all ORB quantitative trading system errors.
@@ -72,6 +72,7 @@ class ORBBaseException(Exception):
 # ---------------------------------------------------------------------------
 # Configuration errors
 # ---------------------------------------------------------------------------
+
 
 class ConfigurationError(ORBBaseException):
     """Raised when a configuration file fails schema or value validation.
@@ -106,6 +107,7 @@ class ConfigurationError(ORBBaseException):
 # ---------------------------------------------------------------------------
 # Data layer errors
 # ---------------------------------------------------------------------------
+
 
 class DataFetchError(ORBBaseException):
     """Raised when a network or API failure occurs while querying Alpaca.
@@ -189,6 +191,7 @@ class DataValidationError(ORBBaseException):
 # Temporal causality guard
 # ---------------------------------------------------------------------------
 
+
 class TemporalLeakageError(ORBBaseException):
     """Raised when lookahead bias or a temporal causality violation is detected.
 
@@ -239,6 +242,7 @@ class TemporalLeakageError(ORBBaseException):
 # ---------------------------------------------------------------------------
 # Backtest runtime errors
 # ---------------------------------------------------------------------------
+
 
 class BacktestExecutionError(ORBBaseException):
     """Raised for runtime errors inside the event-driven backtest simulation.

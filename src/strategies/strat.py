@@ -33,6 +33,7 @@ try:
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
+
     _ALPACA_AVAILABLE = True
 except ImportError:
     _ALPACA_AVAILABLE = False
@@ -42,16 +43,17 @@ except ImportError:
 # Data structures
 # ==========================================================================
 
+
 @dataclass
 class Trade:
     entry_time: pd.Timestamp
     exit_time: Optional[pd.Timestamp] = None
-    direction: str = ""          # "LONG" or "SHORT"
+    direction: str = ""  # "LONG" or "SHORT"
     entry_price: float = 0.0
     exit_price: Optional[float] = None
     stop_loss: float = 0.0
     take_profit: float = 0.0
-    exit_reason: str = ""        # "TP", "SL", "REVERSAL", "EOD"
+    exit_reason: str = ""  # "TP", "SL", "REVERSAL", "EOD"
     pnl: Optional[float] = None
     return_pct: Optional[float] = None
     shares: int = 0
@@ -64,7 +66,11 @@ class Trade:
             self.pnl = (exit_price - self.entry_price) * self.shares
         else:  # SHORT
             self.pnl = (self.entry_price - exit_price) * self.shares
-        self.return_pct = (self.pnl / (self.entry_price * self.shares)) * 100.0 if self.shares else 0.0
+        self.return_pct = (
+            (self.pnl / (self.entry_price * self.shares)) * 100.0
+            if self.shares
+            else 0.0
+        )
 
 
 @dataclass
@@ -82,6 +88,7 @@ class Position:
 # Alpaca data fetcher
 # ==========================================================================
 
+
 class AlpacaDataFetcher:
     """Thin wrapper around alpaca-py to pull historical 1-minute bars."""
 
@@ -92,7 +99,9 @@ class AlpacaDataFetcher:
         if _ALPACA_AVAILABLE and api_key and secret_key:
             self._client = StockHistoricalDataClient(api_key, secret_key)
 
-    def fetch_1min_bars(self, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
+    def fetch_1min_bars(
+        self, symbol: str, start: datetime, end: datetime
+    ) -> pd.DataFrame:
         if self._client is None:
             raise RuntimeError(
                 "Alpaca client not configured (missing alpaca-py or API keys). "
@@ -115,6 +124,7 @@ class AlpacaDataFetcher:
 # ==========================================================================
 # Core backtesting engine
 # ==========================================================================
+
 
 class EmaStrategyBacktester:
     """
@@ -239,7 +249,9 @@ class EmaStrategyBacktester:
         if "ema_fast" not in self.bars.columns:
             self.compute_indicators()
 
-        df = self.bars.dropna(subset=["ema_fast", "ema_slow", "atr"]).reset_index(drop=True)
+        df = self.bars.dropna(subset=["ema_fast", "ema_slow", "atr"]).reset_index(
+            drop=True
+        )
 
         equity_records = []
         self.equity = self.initial_capital
@@ -347,7 +359,9 @@ class EmaStrategyBacktester:
             self._open_position("SHORT", ts, close, atr)
 
     # ----------------------------------------------------------------
-    def _open_position(self, direction: str, ts: pd.Timestamp, entry_price: float, atr: float) -> None:
+    def _open_position(
+        self, direction: str, ts: pd.Timestamp, entry_price: float, atr: float
+    ) -> None:
         if direction == "LONG":
             sl = entry_price - self.sl_atr_mult * atr
             tp = entry_price + self.tp_atr_mult * atr
@@ -397,7 +411,9 @@ class EmaStrategyBacktester:
             )
         else:
             self.consecutive_losses = 0
-            self.circuit_breaker_tripped = False  # winning trade resets breaker eligibility
+            self.circuit_breaker_tripped = (
+                False  # winning trade resets breaker eligibility
+            )
 
         self.trades.append(trade)
         self.position = None
@@ -407,8 +423,11 @@ class EmaStrategyBacktester:
 # Performance reporting
 # ==========================================================================
 
+
 class PerformanceReport:
-    def __init__(self, backtester: EmaStrategyBacktester, bars_per_year: int = 252 * 78):
+    def __init__(
+        self, backtester: EmaStrategyBacktester, bars_per_year: int = 252 * 78
+    ):
         """
         bars_per_year: approximate number of 5-min bars in a trading year
         (78 five-minute bars per 6.5h session * 252 sessions) used for
@@ -426,10 +445,14 @@ class PerformanceReport:
                     "Exit Time": t.exit_time,
                     "Direction": t.direction,
                     "Entry Price": round(t.entry_price, 4),
-                    "Exit Price": round(t.exit_price, 4) if t.exit_price is not None else None,
+                    "Exit Price": (
+                        round(t.exit_price, 4) if t.exit_price is not None else None
+                    ),
                     "Exit Reason": t.exit_reason,
                     "PnL": round(t.pnl, 2) if t.pnl is not None else None,
-                    "Return %": round(t.return_pct, 3) if t.return_pct is not None else None,
+                    "Return %": (
+                        round(t.return_pct, 3) if t.return_pct is not None else None
+                    ),
                 }
             )
         return pd.DataFrame(rows)
@@ -465,11 +488,19 @@ class PerformanceReport:
         gross_loss = abs(sum(t.pnl for t in losses)) if losses else 0.0
 
         win_rate = (len(wins) / total_trades * 100.0) if total_trades else 0.0
-        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float("inf") if gross_profit > 0 else 0.0
+        profit_factor = (
+            (gross_profit / gross_loss)
+            if gross_loss > 0
+            else float("inf") if gross_profit > 0 else 0.0
+        )
 
         avg_win = np.mean([t.pnl for t in wins]) if wins else 0.0
         avg_loss = np.mean([t.pnl for t in losses]) if losses else 0.0
-        win_loss_ratio = (abs(avg_win / avg_loss)) if avg_loss != 0 else float("inf") if avg_win > 0 else 0.0
+        win_loss_ratio = (
+            (abs(avg_win / avg_loss))
+            if avg_loss != 0
+            else float("inf") if avg_win > 0 else 0.0
+        )
         avg_pnl_per_trade = np.mean([t.pnl for t in trades]) if trades else 0.0
 
         final_equity = self.bt.equity
@@ -509,23 +540,33 @@ class PerformanceReport:
 
         line = "=" * 62
         print(line)
-        print(f" 9/21 EMA INSTITUTIONAL BACKTEST REPORT  |  {symbol}  |  {self.bt.timeframe}")
+        print(
+            f" 9/21 EMA INSTITUTIONAL BACKTEST REPORT  |  {symbol}  |  {self.bt.timeframe}"
+        )
         print(line)
         print(f" Initial Capital ......... {money(stats['initial_capital'])}")
         print(f" Final Equity ............ {money(stats['final_equity'])}")
-        print(f" Total Net P&L ........... {money(stats['net_pnl'])}  ({stats['net_pnl_pct']:.2f}%)")
+        print(
+            f" Total Net P&L ........... {money(stats['net_pnl'])}  ({stats['net_pnl_pct']:.2f}%)"
+        )
         print("-" * 62)
         print(f" Total Trades ............ {stats['total_trades']}")
         print(f" Winning Trades .......... {stats['winning_trades']}")
         print(f" Losing Trades ........... {stats['losing_trades']}")
         print(f" Win Rate ................ {stats['win_rate']:.2f}%")
         pf = stats["profit_factor"]
-        print(f" Profit Factor ........... {'inf' if pf == float('inf') else f'{pf:.2f}'}")
+        print(
+            f" Profit Factor ........... {'inf' if pf == float('inf') else f'{pf:.2f}'}"
+        )
         wlr = stats["win_loss_ratio"]
-        print(f" Win/Loss Ratio .......... {'inf' if wlr == float('inf') else f'{wlr:.2f}'}")
+        print(
+            f" Win/Loss Ratio .......... {'inf' if wlr == float('inf') else f'{wlr:.2f}'}"
+        )
         print(f" Avg P&L per Trade ....... {money(stats['avg_pnl_per_trade'])}")
         print("-" * 62)
-        print(f" Max Drawdown ............ {money(stats['max_drawdown_dollar'])}  ({stats['max_drawdown_pct']:.2f}%)")
+        print(
+            f" Max Drawdown ............ {money(stats['max_drawdown_dollar'])}  ({stats['max_drawdown_pct']:.2f}%)"
+        )
         print(f" Annualized Sharpe Ratio . {stats['sharpe_ratio']:.2f}")
         print(f" Max Consecutive Losses .. {stats['max_consecutive_loss_streak']}")
         print(line)
@@ -543,16 +584,21 @@ class PerformanceReport:
 # CSV / synthetic data loading helpers
 # ==========================================================================
 
+
 def load_csv_data(path: str) -> pd.DataFrame:
     df = pd.read_csv(path, parse_dates=["timestamp"])
     required = {"timestamp", "open", "high", "low", "close", "volume"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"CSV missing required columns: {missing}")
-    return df[["timestamp", "open", "high", "low", "close", "volume"]].sort_values("timestamp")
+    return df[["timestamp", "open", "high", "low", "close", "volume"]].sort_values(
+        "timestamp"
+    )
 
 
-def generate_synthetic_data(symbol: str, days: int = 90, seed: int = 42) -> pd.DataFrame:
+def generate_synthetic_data(
+    symbol: str, days: int = 90, seed: int = 42
+) -> pd.DataFrame:
     """Generate a synthetic 1-minute OHLCV dataset for demo/testing when no
     Alpaca credentials or CSV file are available."""
     rng = np.random.default_rng(seed)
@@ -592,30 +638,76 @@ def generate_synthetic_data(symbol: str, days: int = 90, seed: int = 42) -> pd.D
 # CLI
 # ==========================================================================
 
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="9/21 EMA Institutional Crossover Backtester (v5.0)"
     )
     p.add_argument("--symbol", type=str, default="AAPL", help="Ticker symbol")
-    p.add_argument("--csv", type=str, default="aapl_1min_90d.csv", help="Path to 1-min OHLCV CSV file")
+    p.add_argument(
+        "--csv",
+        type=str,
+        default="aapl_1min_90d.csv",
+        help="Path to 1-min OHLCV CSV file",
+    )
     p.add_argument("--capital", type=float, default=100_000.0, help="Initial capital")
-    p.add_argument("--timeframe", type=str, default="5min", help="Resample timeframe (pandas offset alias, e.g. 5min, 15min)")
+    p.add_argument(
+        "--timeframe",
+        type=str,
+        default="5min",
+        help="Resample timeframe (pandas offset alias, e.g. 5min, 15min)",
+    )
     p.add_argument("--fast-ema", type=int, default=9, help="Fast EMA period")
     p.add_argument("--slow-ema", type=int, default=21, help="Slow EMA period")
     p.add_argument("--atr-period", type=int, default=14, help="ATR lookback period")
-    p.add_argument("--min-atr", type=float, default=0.15, help="Minimum ATR required to trade")
-    p.add_argument("--sl-atr-mult", type=float, default=2.5, help="Stop-loss ATR multiple")
-    p.add_argument("--tp-atr-mult", type=float, default=3.0, help="Take-profit ATR multiple")
-    p.add_argument("--enable-shorts", action="store_true", default=True, help="Allow short entries")
-    p.add_argument("--disable-shorts", dest="enable_shorts", action="store_false", help="Disable short entries")
-    p.add_argument("--risk-pct", type=float, default=1.0, help="Percent of equity risked per trade")
-    p.add_argument("--max-consecutive-losses", type=int, default=5, help="Circuit breaker threshold")
-    p.add_argument("--commission", type=float, default=0.0, help="Commission per share (each side)")
-    p.add_argument("--use-alpaca", action="store_true", help="Fetch data live from Alpaca instead of CSV")
+    p.add_argument(
+        "--min-atr", type=float, default=0.15, help="Minimum ATR required to trade"
+    )
+    p.add_argument(
+        "--sl-atr-mult", type=float, default=2.5, help="Stop-loss ATR multiple"
+    )
+    p.add_argument(
+        "--tp-atr-mult", type=float, default=3.0, help="Take-profit ATR multiple"
+    )
+    p.add_argument(
+        "--enable-shorts", action="store_true", default=True, help="Allow short entries"
+    )
+    p.add_argument(
+        "--disable-shorts",
+        dest="enable_shorts",
+        action="store_false",
+        help="Disable short entries",
+    )
+    p.add_argument(
+        "--risk-pct", type=float, default=1.0, help="Percent of equity risked per trade"
+    )
+    p.add_argument(
+        "--max-consecutive-losses",
+        type=int,
+        default=5,
+        help="Circuit breaker threshold",
+    )
+    p.add_argument(
+        "--commission", type=float, default=0.0, help="Commission per share (each side)"
+    )
+    p.add_argument(
+        "--use-alpaca",
+        action="store_true",
+        help="Fetch data live from Alpaca instead of CSV",
+    )
     p.add_argument("--api-key", type=str, default=None, help="Alpaca API key")
     p.add_argument("--secret-key", type=str, default=None, help="Alpaca API secret key")
-    p.add_argument("--days", type=int, default=90, help="Lookback window in days (Alpaca fetch / synthetic data)")
-    p.add_argument("--generate-demo-data", action="store_true", help="Generate synthetic data and save to --csv path if no data source is found")
+    p.add_argument(
+        "--days",
+        type=int,
+        default=90,
+        help="Lookback window in days (Alpaca fetch / synthetic data)",
+    )
+    p.add_argument(
+        "--generate-demo-data",
+        action="store_true",
+        help="Generate synthetic data and save to --csv path if no data source is found",
+    )
     return p
 
 
@@ -626,12 +718,17 @@ def main():
     # ---- 1. Acquire data ----
     if args.use_alpaca:
         if not _ALPACA_AVAILABLE:
-            print("alpaca-py is not installed. Run: pip install alpaca-py", file=sys.stderr)
+            print(
+                "alpaca-py is not installed. Run: pip install alpaca-py",
+                file=sys.stderr,
+            )
             sys.exit(1)
         fetcher = AlpacaDataFetcher(api_key=args.api_key, secret_key=args.secret_key)
         end = datetime.utcnow()
         start = end - timedelta(days=args.days)
-        print(f"Fetching {args.symbol} 1-min bars from Alpaca ({start.date()} -> {end.date()})...")
+        print(
+            f"Fetching {args.symbol} 1-min bars from Alpaca ({start.date()} -> {end.date()})..."
+        )
         raw_df = fetcher.fetch_1min_bars(args.symbol, start, end)
     else:
         csv_path = Path(args.csv)
@@ -639,7 +736,9 @@ def main():
             print(f"Loading 1-min data from {csv_path} ...")
             raw_df = load_csv_data(str(csv_path))
         elif args.generate_demo_data:
-            print(f"No CSV found at {csv_path}. Generating synthetic demo data ({args.days} days)...")
+            print(
+                f"No CSV found at {csv_path}. Generating synthetic demo data ({args.days} days)..."
+            )
             raw_df = generate_synthetic_data(args.symbol, days=args.days)
             raw_df.to_csv(csv_path, index=False)
             print(f"Synthetic data saved to {csv_path}")

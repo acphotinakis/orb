@@ -45,13 +45,15 @@ def parse_args(args=None) -> argparse.Namespace:
         help="Run identifier tag used in the experiment directory name.",
     )
     parser.add_argument(
-        "--symbol", "-s",
+        "--symbol",
+        "-s",
         type=str,
         default=None,
         help="Override ticker symbol (e.g. AAPL, NVDA, QQQ).",
     )
     parser.add_argument(
-        "--timeframe", "-tf",
+        "--timeframe",
+        "-tf",
         type=str,
         default=None,
         help="Override bar timeframe (e.g. 1Min, 5Min, 15Min, 1Hour).",

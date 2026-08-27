@@ -88,27 +88,44 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _OUTPUT_FILENAME: str = "sessions.parquet"
-_PARQUET_ENGINE: str  = "pyarrow"
-_COMPRESSION: str     = "zstd"
+_PARQUET_ENGINE: str = "pyarrow"
+_COMPRESSION: str = "zstd"
 
-_MARKET_OPEN_H: int  = 9
-_MARKET_OPEN_M: int  = 30
+_MARKET_OPEN_H: int = 9
+_MARKET_OPEN_M: int = 30
 
 # Required columns coming in from the validated raw DataFrame
-_REQUIRED_INPUT_COLS: list[str] = ["timestamp", "open", "high", "low", "close", "volume"]
+_REQUIRED_INPUT_COLS: list[str] = [
+    "timestamp",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+]
 
 # Output column order
 _OUTPUT_COLS: list[str] = [
-    "session_id", "timestamp",
-    "open", "high", "low", "close", "volume",
-    "vwap", "trade_count",
-    "minute_of_day", "is_opening_range", "is_trading_window", "is_force_exit",
+    "session_id",
+    "timestamp",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "vwap",
+    "trade_count",
+    "minute_of_day",
+    "is_opening_range",
+    "is_trading_window",
+    "is_force_exit",
 ]
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _add_session_metadata(
     df: pd.DataFrame,
@@ -139,7 +156,7 @@ def _add_session_metadata(
 
     # Minute of day relative to 09:30 ET
     open_minutes = _MARKET_OPEN_H * 60 + _MARKET_OPEN_M  # 570
-    bar_minutes  = df["timestamp"].dt.hour * 60 + df["timestamp"].dt.minute
+    bar_minutes = df["timestamp"].dt.hour * 60 + df["timestamp"].dt.minute
     df["minute_of_day"] = (bar_minutes - open_minutes).astype(np.int32)
 
     # Opening range flag: [09:30, 09:30 + or_minutes)
@@ -154,9 +171,7 @@ def _add_session_metadata(
     df["is_force_exit"] = df["minute_of_day"] >= fe_mod
 
     # Trading window flag: after OR, before force exit
-    df["is_trading_window"] = (
-        (~df["is_opening_range"]) & (~df["is_force_exit"])
-    )
+    df["is_trading_window"] = (~df["is_opening_range"]) & (~df["is_force_exit"])
 
     return df
 
@@ -178,17 +193,14 @@ def _prune_incomplete_sessions(
     Returns:
         Filtered DataFrame with incomplete sessions dropped.
     """
-    or_counts = (
-        df[df["is_opening_range"]]
-        .groupby("session_id")
-        .size()
-    )
+    or_counts = df[df["is_opening_range"]].groupby("session_id").size()
     complete_sessions = or_counts[or_counts >= or_minutes].index
     n_pruned = df["session_id"].nunique() - len(complete_sessions)
     if n_pruned > 0:
         logger.warning(
             "Pruned %d session(s) with incomplete opening ranges (< %d bars).",
-            n_pruned, or_minutes,
+            n_pruned,
+            or_minutes,
         )
     return df[df["session_id"].isin(complete_sessions)].reset_index(drop=True)
 
@@ -214,10 +226,10 @@ def _enforce_output_schema(df: pd.DataFrame) -> pd.DataFrame:
         df["trade_count"] = pd.Series(dtype="Int64")
 
     # Cast types explicitly
-    df["open"]   = df["open"].astype(np.float64)
-    df["high"]   = df["high"].astype(np.float64)
-    df["low"]    = df["low"].astype(np.float64)
-    df["close"]  = df["close"].astype(np.float64)
+    df["open"] = df["open"].astype(np.float64)
+    df["high"] = df["high"].astype(np.float64)
+    df["low"] = df["low"].astype(np.float64)
+    df["close"] = df["close"].astype(np.float64)
     df["volume"] = df["volume"].astype(np.float64)
 
     return df[_OUTPUT_COLS].copy()
@@ -245,7 +257,7 @@ class DataProcessor:
     def __init__(
         self,
         config: AppConfig,
-        output_dir: Optional[Path] = None,
+        output_dir: Path,
     ) -> None:
         """Initialise the DataProcessor.
 
@@ -256,11 +268,7 @@ class DataProcessor:
         """
         self._config = config
         # Accept injected path from PathManager; fall back to a sensible default
-        self._processed_dir: Path = (
-            output_dir
-            if output_dir is not None
-            else Path("data") / "processed" / config.data.symbol
-        )
+        self._processed_dir = output_dir
         self._or_minutes = config.strategy.opening_range_minutes
         self._force_exit_time = config.strategy.force_exit_time
 
@@ -304,8 +312,10 @@ class DataProcessor:
         Raises:
             ValueError: If required input columns are missing.
         """
-        dest = output_path if output_path is not None else (
-            self._processed_dir / _OUTPUT_FILENAME
+        dest = (
+            output_path
+            if output_path is not None
+            else (self._processed_dir / _OUTPUT_FILENAME)
         )
 
         # Early return if processed file already exists on disk
@@ -315,17 +325,23 @@ class DataProcessor:
                 if not cached_df.empty:
                     logger.info(
                         "Processed session cache hit — loaded %d bars across %d session(s) from %s",
-                        len(cached_df), cached_df["session_id"].nunique(), dest,
+                        len(cached_df),
+                        cached_df["session_id"].nunique(),
+                        dest,
                     )
                     return cached_df
             except Exception as exc:
                 logger.warning(
-                    "Failed to read existing processed file %s (%s); re-processing.", dest, exc
+                    "Failed to read existing processed file %s (%s); re-processing.",
+                    dest,
+                    exc,
                 )
 
         logger.info(
             "DataProcessor: processing %d raw bars | or_minutes=%d | force_exit=%s",
-            len(raw_df), self._or_minutes, self._force_exit_time,
+            len(raw_df),
+            self._or_minutes,
+            self._force_exit_time,
         )
 
         # 1. Validate input columns
@@ -345,7 +361,9 @@ class DataProcessor:
         n_post_filter = len(df_rth)
         logger.info(
             "RTH filter: %d → %d bars (%d pre-/post-market dropped).",
-            n_pre_filter, n_post_filter, n_pre_filter - n_post_filter,
+            n_pre_filter,
+            n_post_filter,
+            n_pre_filter - n_post_filter,
         )
 
         if df_rth.empty:
@@ -363,12 +381,15 @@ class DataProcessor:
         df_complete = _prune_incomplete_sessions(df_meta, or_minutes=self._or_minutes)
 
         # 6. Deduplicate on (session_id, timestamp)
-        df_dedup = df_complete.drop_duplicates(subset=["session_id", "timestamp"]).reset_index(drop=True)
+        df_dedup = df_complete.drop_duplicates(
+            subset=["session_id", "timestamp"]
+        ).reset_index(drop=True)
 
         n_sessions = df_dedup["session_id"].nunique()
         logger.info(
             "Processed %d complete trading session(s) | %d bars total.",
-            n_sessions, len(df_dedup),
+            n_sessions,
+            len(df_dedup),
         )
 
         # 7. Enforce output schema
@@ -400,7 +421,10 @@ class DataProcessor:
         )
         logger.info(
             "Saved %d processed bars → %s (%s, %s engine).",
-            len(df), path, _COMPRESSION, _PARQUET_ENGINE,
+            len(df),
+            path,
+            _COMPRESSION,
+            _PARQUET_ENGINE,
         )
 
     # ------------------------------------------------------------------
@@ -434,6 +458,8 @@ class DataProcessor:
             )
         logger.info(
             "Loaded %d processed bars from %s (%d session(s)).",
-            len(df), src.name, df["session_id"].nunique() if "session_id" in df.columns else 0,
+            len(df),
+            src.name,
+            df["session_id"].nunique() if "session_id" in df.columns else 0,
         )
         return df

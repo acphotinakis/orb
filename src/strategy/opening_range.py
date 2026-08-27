@@ -66,19 +66,25 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _PARQUET_ENGINE: str = "pyarrow"
-_COMPRESSION:    str = "zstd"
+_COMPRESSION: str = "zstd"
 _OR_OUTPUT_FILENAME: str = "daily_ranges.parquet"
 
 # Required columns from the processed dataset (TASK-008 output)
 _REQUIRED_COLS: list[str] = [
-    "session_id", "timestamp", "high", "low", "volume",
-    "is_opening_range", "minute_of_day",
+    "session_id",
+    "timestamp",
+    "high",
+    "low",
+    "volume",
+    "is_opening_range",
+    "minute_of_day",
 ]
 
 
 # ---------------------------------------------------------------------------
 # OpeningRange dataclass
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class OpeningRange:
@@ -101,15 +107,15 @@ class OpeningRange:
             exactly ``or_minutes`` bars are present) and ``or_width > 0``.
     """
 
-    session_id:   str
-    start_time:   pd.Timestamp
-    end_time:     pd.Timestamp
-    or_high:      float
-    or_low:       float
-    or_width:     float
+    session_id: str
+    start_time: pd.Timestamp
+    end_time: pd.Timestamp
+    or_high: float
+    or_low: float
+    or_width: float
     total_volume: float
-    bar_count:    int
-    is_valid:     bool
+    bar_count: int
+    is_valid: bool
 
     def __str__(self) -> str:
         return (
@@ -123,6 +129,7 @@ class OpeningRange:
 # ---------------------------------------------------------------------------
 # Calculator
 # ---------------------------------------------------------------------------
+
 
 class OpeningRangeCalculator:
     """Computes frozen opening range boundaries from processed session bars.
@@ -194,9 +201,9 @@ class OpeningRangeCalculator:
         if not or_bars.empty:
             max_mod = int(or_bars["minute_of_day"].max())
             if max_mod >= self._or_minutes:
-                offending_ts = or_bars[
-                    or_bars["minute_of_day"] >= self._or_minutes
-                ]["timestamp"].iloc[0]
+                offending_ts = or_bars[or_bars["minute_of_day"] >= self._or_minutes][
+                    "timestamp"
+                ].iloc[0]
                 raise TemporalLeakageError(
                     f"OR calculation received bar with minute_of_day="
                     f"{max_mod} >= or_minutes={self._or_minutes}. "
@@ -240,14 +247,14 @@ class OpeningRangeCalculator:
             )
 
         # --- Core calculation (vectorised) ---
-        or_high:      float = float(or_bars["high"].max())
-        or_low:       float = float(or_bars["low"].min())
-        or_width:     float = or_high - or_low
+        or_high: float = float(or_bars["high"].max())
+        or_low: float = float(or_bars["low"].min())
+        or_width: float = or_high - or_low
         total_volume: float = float(or_bars["volume"].sum())
-        bar_count:    int   = len(or_bars)
+        bar_count: int = len(or_bars)
 
         start_time = or_bars["timestamp"].min()
-        end_time   = or_bars["timestamp"].max()
+        end_time = or_bars["timestamp"].max()
 
         # Validity gate
         is_valid: bool = (bar_count == self._or_minutes) and (or_width > 0)
@@ -256,12 +263,19 @@ class OpeningRangeCalculator:
             logger.warning(
                 "Session %s: OR invalid — bar_count=%d (expected %d), "
                 "or_width=%.4f.",
-                session_id, bar_count, self._or_minutes, or_width,
+                session_id,
+                bar_count,
+                self._or_minutes,
+                or_width,
             )
         else:
             logger.debug(
                 "Session %s: OR frozen — High=%.4f Low=%.4f Width=%.4f bars=%d.",
-                session_id, or_high, or_low, or_width, bar_count,
+                session_id,
+                or_high,
+                or_low,
+                or_width,
+                bar_count,
             )
 
         return OpeningRange(
@@ -321,9 +335,7 @@ class OpeningRangeCalculator:
             try:
                 opening_range = self.calculate_session_or(session_df)
             except (DataValidationError, TemporalLeakageError) as exc:
-                logger.error(
-                    "Session %s: OR calculation failed — %s", sid, exc
-                )
+                logger.error("Session %s: OR calculation failed — %s", sid, exc)
                 # Re-raise TemporalLeakageError — it is always fatal
                 if isinstance(exc, TemporalLeakageError):
                     raise
@@ -344,7 +356,8 @@ class OpeningRangeCalculator:
         n_valid = sum(1 for r in ranges.values() if r.is_valid)
         logger.info(
             "OR calculation complete: %d/%d sessions valid.",
-            n_valid, len(ranges),
+            n_valid,
+            len(ranges),
         )
 
         # Auto-save if output_dir is configured
@@ -376,17 +389,19 @@ class OpeningRangeCalculator:
         """
         records = []
         for sid, r in sorted(ranges.items()):
-            records.append({
-                "session_id":   r.session_id,
-                "start_time":   r.start_time,
-                "end_time":     r.end_time,
-                "or_high":      r.or_high,
-                "or_low":       r.or_low,
-                "or_width":     r.or_width,
-                "total_volume": r.total_volume,
-                "bar_count":    r.bar_count,
-                "is_valid":     r.is_valid,
-            })
+            records.append(
+                {
+                    "session_id": r.session_id,
+                    "start_time": r.start_time,
+                    "end_time": r.end_time,
+                    "or_high": r.or_high,
+                    "or_low": r.or_low,
+                    "or_width": r.or_width,
+                    "total_volume": r.total_volume,
+                    "bar_count": r.bar_count,
+                    "is_valid": r.is_valid,
+                }
+            )
 
         out_df = pd.DataFrame(records)
         if output_path is not None:
@@ -420,9 +435,7 @@ class OpeningRangeCalculator:
             FileNotFoundError: If *path* does not exist.
         """
         if not path.exists():
-            raise FileNotFoundError(
-                f"Opening ranges file not found: '{path}'."
-            )
+            raise FileNotFoundError(f"Opening ranges file not found: '{path}'.")
         df = pd.read_parquet(path, engine=_PARQUET_ENGINE)
         result: Dict[str, OpeningRange] = {}
         for _, row in df.iterrows():
@@ -443,6 +456,7 @@ class OpeningRangeCalculator:
 # ---------------------------------------------------------------------------
 # Convenience function
 # ---------------------------------------------------------------------------
+
 
 def compute_opening_ranges(
     df: pd.DataFrame,

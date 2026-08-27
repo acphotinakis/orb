@@ -49,7 +49,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -76,12 +75,15 @@ Columns:
 _DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 """strftime format for the timestamp field in log records."""
 
-_VALID_LEVELS: frozenset[str] = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+_VALID_LEVELS: frozenset[str] = frozenset(
+    {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+)
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def setup_logging(
     level: str = "INFO",
@@ -120,8 +122,7 @@ def setup_logging(
     level_upper = level.upper()
     if level_upper not in _VALID_LEVELS:
         raise ValueError(
-            f"Invalid log level '{level}'. "
-            f"Must be one of: {sorted(_VALID_LEVELS)}"
+            f"Invalid log level '{level}'. " f"Must be one of: {sorted(_VALID_LEVELS)}"
         )
 
     root = logging.getLogger(_ORB_ROOT_LOGGER)
@@ -191,7 +192,7 @@ def get_logger(name: str) -> logging.Logger:
         # Map "src.common.config" → "orb.common.config" for clarity,
         # or just prefix a bare name like "fetcher" → "orb.fetcher".
         if name.startswith("src."):
-            name = _ORB_ROOT_LOGGER + "." + name[len("src."):]
+            name = _ORB_ROOT_LOGGER + "." + name[len("src.") :]
         elif name == "src":
             name = _ORB_ROOT_LOGGER
         else:

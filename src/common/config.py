@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 from src.common.logger import get_logger
 
-import yaml                                                                                                                                                                               
+import yaml
 
 logger = get_logger(__name__)
 
@@ -38,6 +38,7 @@ from src.common.exceptions import ConfigurationError  # noqa: E402
 # Sub-config dataclasses — all frozen to prevent accidental mutation during
 # backtest execution.
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class StrategyConfig:
@@ -188,6 +189,7 @@ class AppConfig:
             Nested dictionary representation suitable for JSON serialisation.
         """
         import dataclasses as dc
+
         return dc.asdict(self)
 
     def to_json(self, indent: int = 2) -> str:
@@ -201,6 +203,7 @@ class AppConfig:
         """
         import json
         import dataclasses as dc
+
         return json.dumps(dc.asdict(self), indent=indent, default=str)
 
     def to_yaml(self, path: Union[str, Path]) -> None:
@@ -211,6 +214,7 @@ class AppConfig:
                 created automatically.
         """
         import dataclasses as dc
+
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as fh:
@@ -224,40 +228,49 @@ class AppConfig:
 _TIME_RE = re.compile(r"^\d{2}:\d{2}:\d{2}$")
 
 # ---------------------------------------------------------------------------
-# Timeframe definitions & validation                                                                                                                                             
-# ---------------------------------------------------------------------------                                                                                                    
-                                                                                                                                                                                    
-# Common / standard timeframe options for CLI presets & documentation                                                                                                            
-COMMON_TIMEFRAMES: tuple[str, ...] = (                                                                                                                                           
-    "1Min", "5Min", "15Min", "30Min",                                                                                                                                            
-    "1Hour", "2Hour", "4Hour",                                                                                                                                                   
-    "1Day", "1Week", "1Month",                                                                                                                                                   
-)                                                                                                                                                                                
+# Timeframe definitions & validation
+# ---------------------------------------------------------------------------
 
-# Regex matching Alpaca timeframe specification:
-# - [1-59]Min or [1-59]T                                                                                                                                                         
-# - [1-23]Hour or [1-23]H                                                                                                                                                        
-# - 1Day or 1D / 1Week or 1W                                                                                                                                                     
-# - [1,2,3,4,6,12]Month or [1,2,3,4,6,12]M                                                                                                                                       
-TIMEFRAME_REGEX = re.compile(                                                                                                                                                    
-    r"^("                                                                                                                                                                        
-    r"([1-5]?[0-9])(Min|min|T)|"                                                                                                                                                 
-    r"(1?[0-9]|2[0-3])(Hour|hour|H)|"                                                                                                                                            
-    r"1(Day|day|D)|"                                                                                                                                                             
-    r"1(Week|week|W)|"                                                                                                                                                           
-    r"(1|2|3|4|6|12)(Month|month|M)"                                                                                                                                             
-    r")$"                                                                                                                                                                        
+# Common / standard timeframe options for CLI presets & documentation
+COMMON_TIMEFRAMES: tuple[str, ...] = (
+    "1Min",
+    "5Min",
+    "15Min",
+    "30Min",
+    "1Hour",
+    "2Hour",
+    "4Hour",
+    "1Day",
+    "1Week",
+    "1Month",
 )
 
+# Regex matching Alpaca timeframe specification:
+# - [1-59]Min or [1-59]T
+# - [1-23]Hour or [1-23]H
+# - 1Day or 1D / 1Week or 1W
+# - [1,2,3,4,6,12]Month or [1,2,3,4,6,12]M
+TIMEFRAME_REGEX = re.compile(
+    r"^("
+    r"([1-5]?[0-9])(Min|min|T)|"
+    r"(1?[0-9]|2[0-3])(Hour|hour|H)|"
+    r"1(Day|day|D)|"
+    r"1(Week|week|W)|"
+    r"(1|2|3|4|6|12)(Month|month|M)"
+    r")$"
+)
+
+
 def is_valid_timeframe(tf: str) -> bool:
-    """Return True if string matches Alpaca's timeframe specification."""                                                                                                        
-    if not isinstance(tf, str):                                                                                                                                                  
-        return False                                                                                                                                                             
-    match = TIMEFRAME_REGEX.match(tf.strip())                                                                                                                                    
-    if not match:                                                                                                                                                                
-        return False                                                                                                                                                             
-    # Ensure minute values are between 1 and 59, hour between 1 and 23                                                                                                           
-    return True                                                                                                                                                                  
+    """Return True if string matches Alpaca's timeframe specification."""
+    if not isinstance(tf, str):
+        return False
+    match = TIMEFRAME_REGEX.match(tf.strip())
+    if not match:
+        return False
+    # Ensure minute values are between 1 and 59, hour between 1 and 23
+    return True
+
 
 def _deep_update(target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merge *source* into *target*, skipping ``None`` values.
@@ -277,6 +290,7 @@ def _deep_update(target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, An
         else:
             target[k] = v
     return target
+
 
 def validate_config(config: AppConfig) -> None:
     """Validate all domain constraints on a loaded ``AppConfig``.
@@ -363,7 +377,7 @@ def validate_config(config: AppConfig) -> None:
             f"Invalid timeframe '{d.timeframe}'. Must match Alpaca format: "
             f"[1-59]Min/T, [1-23]Hour/H, 1Day/D, 1Week/W, or [1,2,3,4,6,12]Month/M.",
             field="data.timeframe",
-        )                                                                                                                                                                        
+        )
 
     if d.feed not in {"iex", "sip"}:
         raise ConfigurationError(
@@ -411,9 +425,11 @@ def validate_config(config: AppConfig) -> None:
             field="execution.position_sizing",
         )
 
+
 # ---------------------------------------------------------------------------
 # Private YAML → dataclass mapping helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_strategy(raw: Dict[str, Any]) -> StrategyConfig:
     """Construct a :class:`StrategyConfig` from a raw YAML mapping.
@@ -493,6 +509,7 @@ def _build_data(raw: Dict[str, Any]) -> DataConfig:
         timezone=str(raw.get("timezone", defaults.timezone)),
         is_paper=bool(raw.get("is_paper", defaults.is_paper)),
     )
+
 
 def _build_execution(raw: Dict[str, Any]) -> ExecutionConfig:
     """Construct an :class:`ExecutionConfig` from a raw YAML mapping.

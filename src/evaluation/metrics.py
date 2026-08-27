@@ -111,7 +111,9 @@ def calculate_trade_metrics(trades_df: pd.DataFrame) -> Dict[str, Any]:
         "loss_count": loss_count,
         "scratch_count": scratch_count,
         "win_rate": round(win_rate, 4),
-        "profit_factor": round(profit_factor, 4) if not math.isinf(profit_factor) else "inf",
+        "profit_factor": (
+            round(profit_factor, 4) if not math.isinf(profit_factor) else "inf"
+        ),
         "total_realized_r": round(total_realized_r, 4),
         "avg_r": round(avg_r, 4),
         "median_r": round(median_r, 4),
@@ -161,7 +163,9 @@ def calculate_portfolio_metrics(
     drawdowns_pct = (drawdowns_dollars / hwm) * 100.0
 
     max_drawdown_pct = float(np.max(drawdowns_pct)) if len(drawdowns_pct) > 0 else 0.0
-    max_drawdown_dollars = float(np.max(drawdowns_dollars)) if len(drawdowns_dollars) > 0 else 0.0
+    max_drawdown_dollars = (
+        float(np.max(drawdowns_dollars)) if len(drawdowns_dollars) > 0 else 0.0
+    )
 
     # Drawdown duration calculation (in bars)
     mdd_duration_bars = 0
@@ -221,7 +225,7 @@ def calculate_portfolio_metrics(
 
     # Calmar Ratio: CAGR / Max Drawdown
     if max_drawdown_pct > 0:
-        calmar_ratio = (cagr_pct / max_drawdown_pct)
+        calmar_ratio = cagr_pct / max_drawdown_pct
     elif cagr_pct > 0:
         calmar_ratio = float("inf")
     else:
@@ -233,11 +237,15 @@ def calculate_portfolio_metrics(
         "total_return_pct": round(total_return_pct, 4),
         "cagr_pct": round(cagr_pct, 4),
         "sharpe_ratio": round(sharpe_ratio, 4),
-        "sortino_ratio": round(sortino_ratio, 4) if not math.isinf(sortino_ratio) else "inf",
+        "sortino_ratio": (
+            round(sortino_ratio, 4) if not math.isinf(sortino_ratio) else "inf"
+        ),
         "max_drawdown_pct": round(max_drawdown_pct, 4),
         "max_drawdown_dollars": round(max_drawdown_dollars, 2),
         "max_drawdown_duration_bars": int(mdd_duration_bars),
-        "calmar_ratio": round(calmar_ratio, 4) if not math.isinf(calmar_ratio) else "inf",
+        "calmar_ratio": (
+            round(calmar_ratio, 4) if not math.isinf(calmar_ratio) else "inf"
+        ),
     }
 
 

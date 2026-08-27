@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional, Union
 import matplotlib
+
 matplotlib.use("Agg")  # Non-interactive headless backend
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -38,7 +39,9 @@ class CandlestickTradePlotter:
                 PathManager, this should be a pre-resolved :class:`Path`.
                 Defaults to ``"plots/trades"``.
         """
-        self.output_dir = Path(output_dir) if output_dir is not None else Path("plots/trades")
+        self.output_dir = (
+            Path(output_dir) if output_dir is not None else Path("plots/trades")
+        )
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def plot_trade_session(
@@ -60,7 +63,9 @@ class CandlestickTradePlotter:
         # Ensure session data is sorted and indexed cleanly
         df = session_df.copy().sort_values("timestamp").reset_index(drop=True)
         if df.empty:
-            raise ValueError(f"Empty session DataFrame provided for trade {trade.trade_id}")
+            raise ValueError(
+                f"Empty session DataFrame provided for trade {trade.trade_id}"
+            )
 
         fig, (ax, ax_vol) = plt.subplots(
             2, 1, figsize=(14, 8), gridspec_kw={"height_ratios": [3, 1]}, sharex=True
@@ -77,14 +82,36 @@ class CandlestickTradePlotter:
         down = df[df.close < df.open]
 
         # Up candles
-        ax.bar(up.index, up.close - up.open, width, bottom=up.open, color="#26a69a", edgecolor="#26a69a")
+        ax.bar(
+            up.index,
+            up.close - up.open,
+            width,
+            bottom=up.open,
+            color="#26a69a",
+            edgecolor="#26a69a",
+        )
         ax.bar(up.index, up.high - up.close, width2, bottom=up.close, color="#26a69a")
         ax.bar(up.index, up.low - up.open, width2, bottom=up.open, color="#26a69a")
 
         # Down candles
-        ax.bar(down.index, down.close - down.open, width, bottom=down.open, color="#ef5350", edgecolor="#ef5350")
-        ax.bar(down.index, down.high - down.open, width2, bottom=down.open, color="#ef5350")
-        ax.bar(down.index, down.low - down.close, width2, bottom=down.close, color="#ef5350")
+        ax.bar(
+            down.index,
+            down.close - down.open,
+            width,
+            bottom=down.open,
+            color="#ef5350",
+            edgecolor="#ef5350",
+        )
+        ax.bar(
+            down.index, down.high - down.open, width2, bottom=down.open, color="#ef5350"
+        )
+        ax.bar(
+            down.index,
+            down.low - down.close,
+            width2,
+            bottom=down.close,
+            color="#ef5350",
+        )
 
         # Volume bars
         ax_vol.bar(up.index, up.volume, width, color="#26a69a", alpha=0.6)
@@ -92,7 +119,11 @@ class CandlestickTradePlotter:
         ax_vol.set_ylabel("Volume", fontsize=10)
 
         # 1. Opening Range High/Low lines & shaded box (first 15 bars: 0..14)
-        or_mask = df["is_opening_range"] == True if "is_opening_range" in df.columns else (df.index < 15)
+        or_mask = (
+            df["is_opening_range"] == True
+            if "is_opening_range" in df.columns
+            else (df.index < 15)
+        )
         or_indices = df[or_mask].index
         if len(or_indices) > 0:
             or_start_idx = or_indices[0]
@@ -110,11 +141,33 @@ class CandlestickTradePlotter:
             ax.add_patch(rect)
 
         # Horizontal level lines across the session
-        ax.axhline(trade.or_high, color="#1976d2", linestyle="--", alpha=0.6, label="OR High")
-        ax.axhline(trade.or_low, color="#1976d2", linestyle="--", alpha=0.6, label="OR Low")
-        ax.axhline(trade.entry_price, color="#212121", linestyle="-", alpha=0.8, label=f"Entry (${trade.entry_price:.2f})")
-        ax.axhline(trade.stop_price, color="#d32f2f", linestyle="--", alpha=0.8, label=f"Stop Loss (${trade.stop_price:.2f})")
-        ax.axhline(trade.target_price, color="#388e3c", linestyle="--", alpha=0.8, label=f"Target (${trade.target_price:.2f})")
+        ax.axhline(
+            trade.or_high, color="#1976d2", linestyle="--", alpha=0.6, label="OR High"
+        )
+        ax.axhline(
+            trade.or_low, color="#1976d2", linestyle="--", alpha=0.6, label="OR Low"
+        )
+        ax.axhline(
+            trade.entry_price,
+            color="#212121",
+            linestyle="-",
+            alpha=0.8,
+            label=f"Entry (${trade.entry_price:.2f})",
+        )
+        ax.axhline(
+            trade.stop_price,
+            color="#d32f2f",
+            linestyle="--",
+            alpha=0.8,
+            label=f"Stop Loss (${trade.stop_price:.2f})",
+        )
+        ax.axhline(
+            trade.target_price,
+            color="#388e3c",
+            linestyle="--",
+            alpha=0.8,
+            label=f"Target (${trade.target_price:.2f})",
+        )
 
         # 2. Annotate Entry Point
         entry_matches = df[df["timestamp"] == trade.entry_time].index
@@ -173,10 +226,7 @@ class CandlestickTradePlotter:
         if (n_bars - 1) not in tick_indices:
             tick_indices.append(n_bars - 1)
 
-        tick_labels = [
-            df.iloc[i]["timestamp"].strftime("%H:%M")
-            for i in tick_indices
-        ]
+        tick_labels = [df.iloc[i]["timestamp"].strftime("%H:%M") for i in tick_indices]
         ax_vol.set_xticks(tick_indices)
         ax_vol.set_xticklabels(tick_labels, rotation=0, fontsize=9)
 

@@ -27,9 +27,11 @@ import pandas as pd
 
 try:
     import matplotlib
+
     matplotlib.use("Agg")  # non-interactive backend, safe for headless/CLI runs
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
+
     _MATPLOTLIB_AVAILABLE = True
 except ImportError:
     _MATPLOTLIB_AVAILABLE = False
@@ -42,6 +44,7 @@ try:
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
+
     _ALPACA_AVAILABLE = True
 except ImportError:
     _ALPACA_AVAILABLE = False
@@ -51,16 +54,17 @@ except ImportError:
 # Data structures
 # ==========================================================================
 
+
 @dataclass
 class Trade:
     entry_time: pd.Timestamp
     exit_time: Optional[pd.Timestamp] = None
-    direction: str = ""          # "LONG" or "SHORT"
+    direction: str = ""  # "LONG" or "SHORT"
     entry_price: float = 0.0
     exit_price: Optional[float] = None
     stop_loss: float = 0.0
     take_profit: float = 0.0
-    exit_reason: str = ""        # "TP", "SL", "REVERSAL", "EOD"
+    exit_reason: str = ""  # "TP", "SL", "REVERSAL", "EOD"
     pnl: Optional[float] = None
     return_pct: Optional[float] = None
     shares: int = 0
@@ -73,7 +77,11 @@ class Trade:
             self.pnl = (exit_price - self.entry_price) * self.shares
         else:  # SHORT
             self.pnl = (self.entry_price - exit_price) * self.shares
-        self.return_pct = (self.pnl / (self.entry_price * self.shares)) * 100.0 if self.shares else 0.0
+        self.return_pct = (
+            (self.pnl / (self.entry_price * self.shares)) * 100.0
+            if self.shares
+            else 0.0
+        )
 
 
 @dataclass
@@ -91,6 +99,7 @@ class Position:
 # Alpaca data fetcher
 # ==========================================================================
 
+
 class AlpacaDataFetcher:
     """Thin wrapper around alpaca-py to pull historical 1-minute bars."""
 
@@ -101,7 +110,9 @@ class AlpacaDataFetcher:
         if _ALPACA_AVAILABLE and api_key and secret_key:
             self._client = StockHistoricalDataClient(api_key, secret_key)
 
-    def fetch_1min_bars(self, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
+    def fetch_1min_bars(
+        self, symbol: str, start: datetime, end: datetime
+    ) -> pd.DataFrame:
         if self._client is None:
             raise RuntimeError(
                 "Alpaca client not configured (missing alpaca-py or API keys). "
@@ -124,6 +135,7 @@ class AlpacaDataFetcher:
 # ==========================================================================
 # Core backtesting engine
 # ==========================================================================
+
 
 class EmaStrategyBacktester:
     """
@@ -248,7 +260,9 @@ class EmaStrategyBacktester:
         if "ema_fast" not in self.bars.columns:
             self.compute_indicators()
 
-        df = self.bars.dropna(subset=["ema_fast", "ema_slow", "atr"]).reset_index(drop=True)
+        df = self.bars.dropna(subset=["ema_fast", "ema_slow", "atr"]).reset_index(
+            drop=True
+        )
 
         equity_records = []
         self.equity = self.initial_capital
@@ -356,7 +370,9 @@ class EmaStrategyBacktester:
             self._open_position("SHORT", ts, close, atr)
 
     # ----------------------------------------------------------------
-    def _open_position(self, direction: str, ts: pd.Timestamp, entry_price: float, atr: float) -> None:
+    def _open_position(
+        self, direction: str, ts: pd.Timestamp, entry_price: float, atr: float
+    ) -> None:
         if direction == "LONG":
             sl = entry_price - self.sl_atr_mult * atr
             tp = entry_price + self.tp_atr_mult * atr
@@ -406,7 +422,9 @@ class EmaStrategyBacktester:
             )
         else:
             self.consecutive_losses = 0
-            self.circuit_breaker_tripped = False  # winning trade resets breaker eligibility
+            self.circuit_breaker_tripped = (
+                False  # winning trade resets breaker eligibility
+            )
 
         self.trades.append(trade)
         self.position = None
@@ -416,8 +434,11 @@ class EmaStrategyBacktester:
 # Performance reporting
 # ==========================================================================
 
+
 class PerformanceReport:
-    def __init__(self, backtester: EmaStrategyBacktester, bars_per_year: int = 252 * 78):
+    def __init__(
+        self, backtester: EmaStrategyBacktester, bars_per_year: int = 252 * 78
+    ):
         """
         bars_per_year: approximate number of 5-min bars in a trading year
         (78 five-minute bars per 6.5h session * 252 sessions) used for
@@ -435,10 +456,14 @@ class PerformanceReport:
                     "Exit Time": t.exit_time,
                     "Direction": t.direction,
                     "Entry Price": round(t.entry_price, 4),
-                    "Exit Price": round(t.exit_price, 4) if t.exit_price is not None else None,
+                    "Exit Price": (
+                        round(t.exit_price, 4) if t.exit_price is not None else None
+                    ),
                     "Exit Reason": t.exit_reason,
                     "PnL": round(t.pnl, 2) if t.pnl is not None else None,
-                    "Return %": round(t.return_pct, 3) if t.return_pct is not None else None,
+                    "Return %": (
+                        round(t.return_pct, 3) if t.return_pct is not None else None
+                    ),
                 }
             )
         return pd.DataFrame(rows)
@@ -474,11 +499,19 @@ class PerformanceReport:
         gross_loss = abs(sum(t.pnl for t in losses)) if losses else 0.0
 
         win_rate = (len(wins) / total_trades * 100.0) if total_trades else 0.0
-        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float("inf") if gross_profit > 0 else 0.0
+        profit_factor = (
+            (gross_profit / gross_loss)
+            if gross_loss > 0
+            else float("inf") if gross_profit > 0 else 0.0
+        )
 
         avg_win = np.mean([t.pnl for t in wins]) if wins else 0.0
         avg_loss = np.mean([t.pnl for t in losses]) if losses else 0.0
-        win_loss_ratio = (abs(avg_win / avg_loss)) if avg_loss != 0 else float("inf") if avg_win > 0 else 0.0
+        win_loss_ratio = (
+            (abs(avg_win / avg_loss))
+            if avg_loss != 0
+            else float("inf") if avg_win > 0 else 0.0
+        )
         avg_pnl_per_trade = np.mean([t.pnl for t in trades]) if trades else 0.0
 
         final_equity = self.bt.equity
@@ -518,23 +551,33 @@ class PerformanceReport:
 
         line = "=" * 62
         print(line)
-        print(f" 9/21 EMA INSTITUTIONAL BACKTEST REPORT  |  {symbol}  |  {self.bt.timeframe}")
+        print(
+            f" 9/21 EMA INSTITUTIONAL BACKTEST REPORT  |  {symbol}  |  {self.bt.timeframe}"
+        )
         print(line)
         print(f" Initial Capital ......... {money(stats['initial_capital'])}")
         print(f" Final Equity ............ {money(stats['final_equity'])}")
-        print(f" Total Net P&L ........... {money(stats['net_pnl'])}  ({stats['net_pnl_pct']:.2f}%)")
+        print(
+            f" Total Net P&L ........... {money(stats['net_pnl'])}  ({stats['net_pnl_pct']:.2f}%)"
+        )
         print("-" * 62)
         print(f" Total Trades ............ {stats['total_trades']}")
         print(f" Winning Trades .......... {stats['winning_trades']}")
         print(f" Losing Trades ........... {stats['losing_trades']}")
         print(f" Win Rate ................ {stats['win_rate']:.2f}%")
         pf = stats["profit_factor"]
-        print(f" Profit Factor ........... {'inf' if pf == float('inf') else f'{pf:.2f}'}")
+        print(
+            f" Profit Factor ........... {'inf' if pf == float('inf') else f'{pf:.2f}'}"
+        )
         wlr = stats["win_loss_ratio"]
-        print(f" Win/Loss Ratio .......... {'inf' if wlr == float('inf') else f'{wlr:.2f}'}")
+        print(
+            f" Win/Loss Ratio .......... {'inf' if wlr == float('inf') else f'{wlr:.2f}'}"
+        )
         print(f" Avg P&L per Trade ....... {money(stats['avg_pnl_per_trade'])}")
         print("-" * 62)
-        print(f" Max Drawdown ............ {money(stats['max_drawdown_dollar'])}  ({stats['max_drawdown_pct']:.2f}%)")
+        print(
+            f" Max Drawdown ............ {money(stats['max_drawdown_dollar'])}  ({stats['max_drawdown_pct']:.2f}%)"
+        )
         print(f" Annualized Sharpe Ratio . {stats['sharpe_ratio']:.2f}")
         print(f" Max Consecutive Losses .. {stats['max_consecutive_loss_streak']}")
         print(line)
@@ -551,6 +594,7 @@ class PerformanceReport:
 # ==========================================================================
 # Plotting
 # ==========================================================================
+
 
 class PlotGenerator:
     """Generates institutional-style backtest charts: equity curve with
@@ -570,9 +614,9 @@ class PlotGenerator:
         self.c_grid = "#2a2e39"
         self.c_text = "#d1d4dc"
         self.c_price = "#d1d4dc"
-        self.c_fast = "#f0b90b"   # amber - fast EMA
-        self.c_slow = "#4a90e2"   # blue - slow EMA
-        self.c_long = "#26a69a"   # teal green
+        self.c_fast = "#f0b90b"  # amber - fast EMA
+        self.c_slow = "#4a90e2"  # blue - slow EMA
+        self.c_long = "#26a69a"  # teal green
         self.c_short = "#ef5350"  # red
         self.c_equity = "#26a69a"
         self.c_dd = "#ef5350"
@@ -589,7 +633,9 @@ class PlotGenerator:
         ax.title.set_color(self.c_text)
 
     # ------------------------------------------------------------
-    def plot_equity_curve(self, filename: str = "equity_curve.png", show: bool = False) -> str:
+    def plot_equity_curve(
+        self, filename: str = "equity_curve.png", show: bool = False
+    ) -> str:
         """Equity curve (top) with underwater drawdown chart (bottom)."""
         eq = self.bt.equity_curve
         if eq.empty:
@@ -599,22 +645,60 @@ class PlotGenerator:
         drawdown_pct = (eq["equity"] - running_max) / running_max * 100.0
 
         fig, (ax1, ax2) = plt.subplots(
-            2, 1, figsize=(13, 7), sharex=True,
+            2,
+            1,
+            figsize=(13, 7),
+            sharex=True,
             gridspec_kw={"height_ratios": [3, 1]},
             facecolor=self.c_bg,
         )
 
-        ax1.plot(eq["timestamp"], eq["equity"], color=self.c_equity, linewidth=1.4, label="Equity")
-        ax1.axhline(self.bt.initial_capital, color=self.c_text, linewidth=0.8, linestyle="--", alpha=0.5, label="Initial Capital")
-        ax1.fill_between(eq["timestamp"], eq["equity"], self.bt.initial_capital,
-                          where=(eq["equity"] >= self.bt.initial_capital),
-                          color=self.c_equity, alpha=0.08, interpolate=True)
-        ax1.fill_between(eq["timestamp"], eq["equity"], self.bt.initial_capital,
-                          where=(eq["equity"] < self.bt.initial_capital),
-                          color=self.c_dd, alpha=0.08, interpolate=True)
-        ax1.set_title(f"{self.bt.symbol} — 9/21 EMA Strategy: Equity Curve ({self.bt.timeframe})", fontsize=12, fontweight="bold")
+        ax1.plot(
+            eq["timestamp"],
+            eq["equity"],
+            color=self.c_equity,
+            linewidth=1.4,
+            label="Equity",
+        )
+        ax1.axhline(
+            self.bt.initial_capital,
+            color=self.c_text,
+            linewidth=0.8,
+            linestyle="--",
+            alpha=0.5,
+            label="Initial Capital",
+        )
+        ax1.fill_between(
+            eq["timestamp"],
+            eq["equity"],
+            self.bt.initial_capital,
+            where=(eq["equity"] >= self.bt.initial_capital),
+            color=self.c_equity,
+            alpha=0.08,
+            interpolate=True,
+        )
+        ax1.fill_between(
+            eq["timestamp"],
+            eq["equity"],
+            self.bt.initial_capital,
+            where=(eq["equity"] < self.bt.initial_capital),
+            color=self.c_dd,
+            alpha=0.08,
+            interpolate=True,
+        )
+        ax1.set_title(
+            f"{self.bt.symbol} — 9/21 EMA Strategy: Equity Curve ({self.bt.timeframe})",
+            fontsize=12,
+            fontweight="bold",
+        )
         ax1.set_ylabel("Equity ($)")
-        ax1.legend(loc="upper left", facecolor=self.c_bg, edgecolor=self.c_grid, labelcolor=self.c_text, fontsize=8)
+        ax1.legend(
+            loc="upper left",
+            facecolor=self.c_bg,
+            edgecolor=self.c_grid,
+            labelcolor=self.c_text,
+            fontsize=8,
+        )
         self._style_axes(ax1)
 
         ax2.fill_between(eq["timestamp"], drawdown_pct, 0, color=self.c_dd, alpha=0.5)
@@ -633,43 +717,127 @@ class PlotGenerator:
         return str(out_path)
 
     # ------------------------------------------------------------
-    def plot_price_and_trades(self, filename: str = "price_trades.png", show: bool = False) -> str:
+    def plot_price_and_trades(
+        self, filename: str = "price_trades.png", show: bool = False
+    ) -> str:
         """Price chart with 9/21 EMA overlay and trade entry/exit markers."""
         df = self.bt.bars.dropna(subset=["ema_fast", "ema_slow"]).reset_index(drop=True)
         if df.empty:
-            raise ValueError("No indicator data available. Run compute_indicators() first.")
+            raise ValueError(
+                "No indicator data available. Run compute_indicators() first."
+            )
 
         fig, ax = plt.subplots(figsize=(13, 6.5), facecolor=self.c_bg)
 
-        ax.plot(df["timestamp"], df["close"], color=self.c_price, linewidth=0.8, alpha=0.85, label="Close")
-        ax.plot(df["timestamp"], df["ema_fast"], color=self.c_fast, linewidth=1.0,
-                label=f"EMA {self.bt.fast_ema}")
-        ax.plot(df["timestamp"], df["ema_slow"], color=self.c_slow, linewidth=1.0,
-                label=f"EMA {self.bt.slow_ema}")
+        ax.plot(
+            df["timestamp"],
+            df["close"],
+            color=self.c_price,
+            linewidth=0.8,
+            alpha=0.85,
+            label="Close",
+        )
+        ax.plot(
+            df["timestamp"],
+            df["ema_fast"],
+            color=self.c_fast,
+            linewidth=1.0,
+            label=f"EMA {self.bt.fast_ema}",
+        )
+        ax.plot(
+            df["timestamp"],
+            df["ema_slow"],
+            color=self.c_slow,
+            linewidth=1.0,
+            label=f"EMA {self.bt.slow_ema}",
+        )
 
-        long_entries = [(t.entry_time, t.entry_price) for t in self.bt.trades if t.direction == "LONG"]
-        short_entries = [(t.entry_time, t.entry_price) for t in self.bt.trades if t.direction == "SHORT"]
-        wins = [(t.exit_time, t.exit_price) for t in self.bt.trades if t.pnl is not None and t.pnl > 0]
-        losses = [(t.exit_time, t.exit_price) for t in self.bt.trades if t.pnl is not None and t.pnl <= 0]
+        long_entries = [
+            (t.entry_time, t.entry_price)
+            for t in self.bt.trades
+            if t.direction == "LONG"
+        ]
+        short_entries = [
+            (t.entry_time, t.entry_price)
+            for t in self.bt.trades
+            if t.direction == "SHORT"
+        ]
+        wins = [
+            (t.exit_time, t.exit_price)
+            for t in self.bt.trades
+            if t.pnl is not None and t.pnl > 0
+        ]
+        losses = [
+            (t.exit_time, t.exit_price)
+            for t in self.bt.trades
+            if t.pnl is not None and t.pnl <= 0
+        ]
 
         if long_entries:
             xs, ys = zip(*long_entries)
-            ax.scatter(xs, ys, marker="^", color=self.c_long, s=60, zorder=5, label="Long Entry", edgecolors="white", linewidths=0.4)
+            ax.scatter(
+                xs,
+                ys,
+                marker="^",
+                color=self.c_long,
+                s=60,
+                zorder=5,
+                label="Long Entry",
+                edgecolors="white",
+                linewidths=0.4,
+            )
         if short_entries:
             xs, ys = zip(*short_entries)
-            ax.scatter(xs, ys, marker="v", color=self.c_short, s=60, zorder=5, label="Short Entry", edgecolors="white", linewidths=0.4)
+            ax.scatter(
+                xs,
+                ys,
+                marker="v",
+                color=self.c_short,
+                s=60,
+                zorder=5,
+                label="Short Entry",
+                edgecolors="white",
+                linewidths=0.4,
+            )
         if wins:
             xs, ys = zip(*wins)
-            ax.scatter(xs, ys, marker="o", facecolors="none", edgecolors=self.c_long, s=50, zorder=5, label="Winning Exit")
+            ax.scatter(
+                xs,
+                ys,
+                marker="o",
+                facecolors="none",
+                edgecolors=self.c_long,
+                s=50,
+                zorder=5,
+                label="Winning Exit",
+            )
         if losses:
             xs, ys = zip(*losses)
-            ax.scatter(xs, ys, marker="x", color=self.c_short, s=50, zorder=5, label="Losing Exit")
+            ax.scatter(
+                xs,
+                ys,
+                marker="x",
+                color=self.c_short,
+                s=50,
+                zorder=5,
+                label="Losing Exit",
+            )
 
-        ax.set_title(f"{self.bt.symbol} — Price, EMA 9/21 Crossovers & Trade Markers ({self.bt.timeframe})",
-                     fontsize=12, fontweight="bold")
+        ax.set_title(
+            f"{self.bt.symbol} — Price, EMA 9/21 Crossovers & Trade Markers ({self.bt.timeframe})",
+            fontsize=12,
+            fontweight="bold",
+        )
         ax.set_ylabel("Price ($)")
         ax.set_xlabel("Time")
-        ax.legend(loc="upper left", facecolor=self.c_bg, edgecolor=self.c_grid, labelcolor=self.c_text, fontsize=8, ncol=3)
+        ax.legend(
+            loc="upper left",
+            facecolor=self.c_bg,
+            edgecolor=self.c_grid,
+            labelcolor=self.c_text,
+            fontsize=8,
+            ncol=3,
+        )
         self._style_axes(ax)
 
         fig.autofmt_xdate()
@@ -682,7 +850,9 @@ class PlotGenerator:
         return str(out_path)
 
     # ------------------------------------------------------------
-    def plot_trade_pnl_distribution(self, filename: str = "trade_pnl_distribution.png", show: bool = False) -> str:
+    def plot_trade_pnl_distribution(
+        self, filename: str = "trade_pnl_distribution.png", show: bool = False
+    ) -> str:
         """Bar chart of individual trade P&L plus a cumulative P&L line."""
         trades = self.bt.trades
         if not trades:
@@ -721,7 +891,10 @@ class PlotGenerator:
     # ------------------------------------------------------------
     def generate_all(self, show: bool = False) -> list[str]:
         """Generate the full plot suite and return the list of saved paths."""
-        paths = [self.plot_equity_curve(show=show), self.plot_price_and_trades(show=show)]
+        paths = [
+            self.plot_equity_curve(show=show),
+            self.plot_price_and_trades(show=show),
+        ]
         if self.bt.trades:
             paths.append(self.plot_trade_pnl_distribution(show=show))
         return paths
@@ -731,16 +904,21 @@ class PlotGenerator:
 # CSV / synthetic data loading helpers
 # ==========================================================================
 
+
 def load_csv_data(path: str) -> pd.DataFrame:
     df = pd.read_csv(path, parse_dates=["timestamp"])
     required = {"timestamp", "open", "high", "low", "close", "volume"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"CSV missing required columns: {missing}")
-    return df[["timestamp", "open", "high", "low", "close", "volume"]].sort_values("timestamp")
+    return df[["timestamp", "open", "high", "low", "close", "volume"]].sort_values(
+        "timestamp"
+    )
 
 
-def generate_synthetic_data(symbol: str, days: int = 90, seed: int = 42) -> pd.DataFrame:
+def generate_synthetic_data(
+    symbol: str, days: int = 90, seed: int = 42
+) -> pd.DataFrame:
     """Generate a synthetic 1-minute OHLCV dataset for demo/testing when no
     Alpaca credentials or CSV file are available."""
     rng = np.random.default_rng(seed)
@@ -780,33 +958,92 @@ def generate_synthetic_data(symbol: str, days: int = 90, seed: int = 42) -> pd.D
 # CLI
 # ==========================================================================
 
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="9/21 EMA Institutional Crossover Backtester (v5.0)"
     )
     p.add_argument("--symbol", type=str, default="AAPL", help="Ticker symbol")
-    p.add_argument("--csv", type=str, default="aapl_1min_90d.csv", help="Path to 1-min OHLCV CSV file")
+    p.add_argument(
+        "--csv",
+        type=str,
+        default="aapl_1min_90d.csv",
+        help="Path to 1-min OHLCV CSV file",
+    )
     p.add_argument("--capital", type=float, default=100_000.0, help="Initial capital")
-    p.add_argument("--timeframe", type=str, default="5min", help="Resample timeframe (pandas offset alias, e.g. 5min, 15min)")
+    p.add_argument(
+        "--timeframe",
+        type=str,
+        default="5min",
+        help="Resample timeframe (pandas offset alias, e.g. 5min, 15min)",
+    )
     p.add_argument("--fast-ema", type=int, default=9, help="Fast EMA period")
     p.add_argument("--slow-ema", type=int, default=21, help="Slow EMA period")
     p.add_argument("--atr-period", type=int, default=14, help="ATR lookback period")
-    p.add_argument("--min-atr", type=float, default=0.15, help="Minimum ATR required to trade")
-    p.add_argument("--sl-atr-mult", type=float, default=2.5, help="Stop-loss ATR multiple")
-    p.add_argument("--tp-atr-mult", type=float, default=3.0, help="Take-profit ATR multiple")
-    p.add_argument("--enable-shorts", action="store_true", default=True, help="Allow short entries")
-    p.add_argument("--disable-shorts", dest="enable_shorts", action="store_false", help="Disable short entries")
-    p.add_argument("--risk-pct", type=float, default=1.0, help="Percent of equity risked per trade")
-    p.add_argument("--max-consecutive-losses", type=int, default=5, help="Circuit breaker threshold")
-    p.add_argument("--commission", type=float, default=0.0, help="Commission per share (each side)")
-    p.add_argument("--use-alpaca", action="store_true", help="Fetch data live from Alpaca instead of CSV")
+    p.add_argument(
+        "--min-atr", type=float, default=0.15, help="Minimum ATR required to trade"
+    )
+    p.add_argument(
+        "--sl-atr-mult", type=float, default=2.5, help="Stop-loss ATR multiple"
+    )
+    p.add_argument(
+        "--tp-atr-mult", type=float, default=3.0, help="Take-profit ATR multiple"
+    )
+    p.add_argument(
+        "--enable-shorts", action="store_true", default=True, help="Allow short entries"
+    )
+    p.add_argument(
+        "--disable-shorts",
+        dest="enable_shorts",
+        action="store_false",
+        help="Disable short entries",
+    )
+    p.add_argument(
+        "--risk-pct", type=float, default=1.0, help="Percent of equity risked per trade"
+    )
+    p.add_argument(
+        "--max-consecutive-losses",
+        type=int,
+        default=5,
+        help="Circuit breaker threshold",
+    )
+    p.add_argument(
+        "--commission", type=float, default=0.0, help="Commission per share (each side)"
+    )
+    p.add_argument(
+        "--use-alpaca",
+        action="store_true",
+        help="Fetch data live from Alpaca instead of CSV",
+    )
     p.add_argument("--api-key", type=str, default=None, help="Alpaca API key")
     p.add_argument("--secret-key", type=str, default=None, help="Alpaca API secret key")
-    p.add_argument("--days", type=int, default=90, help="Lookback window in days (Alpaca fetch / synthetic data)")
-    p.add_argument("--generate-demo-data", action="store_true", help="Generate synthetic data and save to --csv path if no data source is found")
-    p.add_argument("--plot", action="store_true", help="Generate and save backtest plots (equity curve, price/trades, P&L distribution)")
-    p.add_argument("--plot-dir", type=str, default="plots", help="Directory to save generated plots")
-    p.add_argument("--show-plots", action="store_true", help="Display plots interactively in addition to saving them")
+    p.add_argument(
+        "--days",
+        type=int,
+        default=90,
+        help="Lookback window in days (Alpaca fetch / synthetic data)",
+    )
+    p.add_argument(
+        "--generate-demo-data",
+        action="store_true",
+        help="Generate synthetic data and save to --csv path if no data source is found",
+    )
+    p.add_argument(
+        "--plot",
+        action="store_true",
+        help="Generate and save backtest plots (equity curve, price/trades, P&L distribution)",
+    )
+    p.add_argument(
+        "--plot-dir",
+        type=str,
+        default="plots",
+        help="Directory to save generated plots",
+    )
+    p.add_argument(
+        "--show-plots",
+        action="store_true",
+        help="Display plots interactively in addition to saving them",
+    )
     return p
 
 
@@ -817,12 +1054,17 @@ def main():
     # ---- 1. Acquire data ----
     if args.use_alpaca:
         if not _ALPACA_AVAILABLE:
-            print("alpaca-py is not installed. Run: pip install alpaca-py", file=sys.stderr)
+            print(
+                "alpaca-py is not installed. Run: pip install alpaca-py",
+                file=sys.stderr,
+            )
             sys.exit(1)
         fetcher = AlpacaDataFetcher(api_key=args.api_key, secret_key=args.secret_key)
         end = datetime.utcnow()
         start = end - timedelta(days=args.days)
-        print(f"Fetching {args.symbol} 1-min bars from Alpaca ({start.date()} -> {end.date()})...")
+        print(
+            f"Fetching {args.symbol} 1-min bars from Alpaca ({start.date()} -> {end.date()})..."
+        )
         raw_df = fetcher.fetch_1min_bars(args.symbol, start, end)
     else:
         csv_path = Path(args.csv)
@@ -830,7 +1072,9 @@ def main():
             print(f"Loading 1-min data from {csv_path} ...")
             raw_df = load_csv_data(str(csv_path))
         elif args.generate_demo_data:
-            print(f"No CSV found at {csv_path}. Generating synthetic demo data ({args.days} days)...")
+            print(
+                f"No CSV found at {csv_path}. Generating synthetic demo data ({args.days} days)..."
+            )
             raw_df = generate_synthetic_data(args.symbol, days=args.days)
             raw_df.to_csv(csv_path, index=False)
             print(f"Synthetic data saved to {csv_path}")
@@ -879,7 +1123,10 @@ def main():
     # ---- 4. Plots ----
     if args.plot:
         if not _MATPLOTLIB_AVAILABLE:
-            print("\nmatplotlib is not installed — skipping plots. Run: pip install matplotlib", file=sys.stderr)
+            print(
+                "\nmatplotlib is not installed — skipping plots. Run: pip install matplotlib",
+                file=sys.stderr,
+            )
         else:
             print(f"\nGenerating plots -> {args.plot_dir}/ ...")
             plotter = PlotGenerator(bt, output_dir=args.plot_dir)

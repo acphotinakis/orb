@@ -29,6 +29,7 @@ logger = get_logger(__name__)
 @dataclass
 class BacktestResult:
     """Container holding all backtest execution artifacts."""
+
     trades: List[Trade]
     trades_df: pd.DataFrame
     equity_curve: pd.DataFrame
@@ -71,22 +72,29 @@ class BacktestEngine:
             # 1. Opening Range phase: Compute & Freeze OR
             or_obj = self.or_calculator.calculate_session_or(session_bars)
             if not or_obj.is_valid:
-                logger.warning("Session %s has invalid OR; skipping session trading.", session_id_str)
+                logger.warning(
+                    "Session %s has invalid OR; skipping session trading.",
+                    session_id_str,
+                )
                 # Still record equity curve as flat
                 for _, bar in session_bars.iterrows():
-                    equity_records.append({
-                        "timestamp": bar["timestamp"],
-                        "session_id": session_id_str,
-                        "cash": current_capital,
-                        "position_value": 0.0,
-                        "equity": current_capital,
-                    })
-                daily_records.append({
-                    "date": session_id_str,
-                    "trades_count": 0,
-                    "daily_pnl": 0.0,
-                    "ending_equity": current_capital,
-                })
+                    equity_records.append(
+                        {
+                            "timestamp": bar["timestamp"],
+                            "session_id": session_id_str,
+                            "cash": current_capital,
+                            "position_value": 0.0,
+                            "equity": current_capital,
+                        }
+                    )
+                daily_records.append(
+                    {
+                        "date": session_id_str,
+                        "trades_count": 0,
+                        "daily_pnl": 0.0,
+                        "ending_equity": current_capital,
+                    }
+                )
                 continue
 
             # 2. Sequential bar replay
@@ -138,18 +146,24 @@ class BacktestEngine:
                 unrealized_pnl = 0.0
                 if active_position is not None:
                     if active_position.side == PositionSide.LONG:
-                        unrealized_pnl = (close_p - active_position.entry_price) * active_position.shares
+                        unrealized_pnl = (
+                            close_p - active_position.entry_price
+                        ) * active_position.shares
                     elif active_position.side == PositionSide.SHORT:
-                        unrealized_pnl = (active_position.entry_price - close_p) * active_position.shares
+                        unrealized_pnl = (
+                            active_position.entry_price - close_p
+                        ) * active_position.shares
 
                 mtm_equity = current_capital + unrealized_pnl
-                equity_records.append({
-                    "timestamp": ts,
-                    "session_id": session_id_str,
-                    "cash": current_capital,
-                    "position_value": unrealized_pnl,
-                    "equity": mtm_equity,
-                })
+                equity_records.append(
+                    {
+                        "timestamp": ts,
+                        "session_id": session_id_str,
+                        "cash": current_capital,
+                        "position_value": unrealized_pnl,
+                        "equity": mtm_equity,
+                    }
+                )
 
             # End of session audit: Ensure no position left open
             if active_position is not None:
@@ -164,23 +178,43 @@ class BacktestEngine:
                 active_position = None
 
             daily_pnl = current_capital - session_start_capital
-            daily_records.append({
-                "date": session_id_str,
-                "trades_count": session_trades_count,
-                "daily_pnl": daily_pnl,
-                "ending_equity": current_capital,
-            })
+            daily_records.append(
+                {
+                    "date": session_id_str,
+                    "trades_count": session_trades_count,
+                    "daily_pnl": daily_pnl,
+                    "ending_equity": current_capital,
+                }
+            )
 
         # Assemble Output DataFrames
         trades_df = (
             pd.DataFrame([t.to_dict() for t in all_trades])
             if all_trades
-            else pd.DataFrame(columns=[
-                "trade_id", "date", "symbol", "direction", "entry_time", "exit_time",
-                "entry_price", "exit_price", "stop_price", "target_price", "or_high",
-                "or_low", "or_width", "shares", "pnl_dollars", "return_pct", "r_multiple",
-                "exit_reason", "slippage_paid", "commission_paid"
-            ])
+            else pd.DataFrame(
+                columns=[
+                    "trade_id",
+                    "date",
+                    "symbol",
+                    "direction",
+                    "entry_time",
+                    "exit_time",
+                    "entry_price",
+                    "exit_price",
+                    "stop_price",
+                    "target_price",
+                    "or_high",
+                    "or_low",
+                    "or_width",
+                    "shares",
+                    "pnl_dollars",
+                    "return_pct",
+                    "r_multiple",
+                    "exit_reason",
+                    "slippage_paid",
+                    "commission_paid",
+                ]
+            )
         )
         equity_df = pd.DataFrame(equity_records)
         daily_df = pd.DataFrame(daily_records)
@@ -233,7 +267,9 @@ class BacktestEngine:
             )
 
         # Short breakout
-        elif direction_mode in ("both", "short_only") and close_p < (or_low - buffer_val):
+        elif direction_mode in ("both", "short_only") and close_p < (
+            or_low - buffer_val
+        ):
             stop_loss = or_high
             risk_amt = stop_loss - close_p
             if risk_amt <= 0:
@@ -272,10 +308,12 @@ class BacktestEngine:
             logger.debug("Position size 0 calculated; skipping trade entry.")
             return None
 
-        fill_price, entry_slip, entry_comm = self.execution_model.calculate_entry_execution(
-            direction=signal.direction,
-            price=signal.entry_price,
-            shares=shares,
+        fill_price, entry_slip, entry_comm = (
+            self.execution_model.calculate_entry_execution(
+                direction=signal.direction,
+                price=signal.entry_price,
+                shares=shares,
+            )
         )
 
         side = PositionSide.LONG if signal.direction == "LONG" else PositionSide.SHORT
@@ -324,14 +362,22 @@ class BacktestEngine:
 
             # Dual touch or pure Stop -> STOP LOSS FIRST
             if hit_stop and hit_target:
-                logger.debug("Dual-touch bar detected on LONG position; resolving conservatively to STOP.")
-                closed = self._execute_exit(position, ts, position.stop_loss, ExitReason.STOP)
+                logger.debug(
+                    "Dual-touch bar detected on LONG position; resolving conservatively to STOP."
+                )
+                closed = self._execute_exit(
+                    position, ts, position.stop_loss, ExitReason.STOP
+                )
                 return None, closed
             elif hit_stop:
-                closed = self._execute_exit(position, ts, position.stop_loss, ExitReason.STOP)
+                closed = self._execute_exit(
+                    position, ts, position.stop_loss, ExitReason.STOP
+                )
                 return None, closed
             elif hit_target:
-                closed = self._execute_exit(position, ts, position.take_profit, ExitReason.TARGET)
+                closed = self._execute_exit(
+                    position, ts, position.take_profit, ExitReason.TARGET
+                )
                 return None, closed
 
         elif position.side == PositionSide.SHORT:
@@ -340,14 +386,22 @@ class BacktestEngine:
 
             # Dual touch or pure Stop -> STOP LOSS FIRST
             if hit_stop and hit_target:
-                logger.debug("Dual-touch bar detected on SHORT position; resolving conservatively to STOP.")
-                closed = self._execute_exit(position, ts, position.stop_loss, ExitReason.STOP)
+                logger.debug(
+                    "Dual-touch bar detected on SHORT position; resolving conservatively to STOP."
+                )
+                closed = self._execute_exit(
+                    position, ts, position.stop_loss, ExitReason.STOP
+                )
                 return None, closed
             elif hit_stop:
-                closed = self._execute_exit(position, ts, position.stop_loss, ExitReason.STOP)
+                closed = self._execute_exit(
+                    position, ts, position.stop_loss, ExitReason.STOP
+                )
                 return None, closed
             elif hit_target:
-                closed = self._execute_exit(position, ts, position.take_profit, ExitReason.TARGET)
+                closed = self._execute_exit(
+                    position, ts, position.take_profit, ExitReason.TARGET
+                )
                 return None, closed
 
         return position, None
@@ -360,18 +414,22 @@ class BacktestEngine:
         reason: ExitReason,
     ) -> Trade:
         """Applies exit slippage/commissions and closes position."""
-        fill_price, exit_slip, exit_comm = self.execution_model.calculate_exit_execution(
-            direction=position.side.value,
-            price=price,
-            shares=position.shares,
-            reason=reason,
+        fill_price, exit_slip, exit_comm = (
+            self.execution_model.calculate_exit_execution(
+                direction=position.side.value,
+                price=price,
+                shares=position.shares,
+                reason=reason,
+            )
         )
 
         # Accrue total entry + exit slippage and commissions
         # Entry slippage
         entry_slip = self.config.execution.slippage_per_share * position.shares
         total_slippage = entry_slip + exit_slip
-        total_commission = self.execution_model.calculate_total_commission(position.shares)
+        total_commission = self.execution_model.calculate_total_commission(
+            position.shares
+        )
 
         return position.close(
             exit_time=exit_time,

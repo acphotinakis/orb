@@ -275,7 +275,11 @@ class DataFetcher:
         self._cache_dir: Path = (
             cache_dir
             if cache_dir is not None
-            else Path("data") / "raw" / config.data.symbol / config.data.feed / config.data.timeframe
+            else Path("data")
+            / "raw"
+            / config.data.symbol
+            / config.data.feed
+            / config.data.timeframe
         )
 
     # ------------------------------------------------------------------
@@ -325,7 +329,7 @@ class DataFetcher:
     def fetch_and_cache(
         self,
         symbol: str = "SPY",
-        timeframe: str= "15Min",
+        timeframe: str = "15Min",
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         force_refresh: bool = False,
@@ -435,7 +439,9 @@ class DataFetcher:
 
         # ── Merge with any partial existing cache ────────────────────
         frames_to_merge: list[pd.DataFrame] = [fresh_df]
-        existing_files = sorted(cache_dir.glob(f"{symbol}_{self._config.data.timeframe}_*.parquet"))
+        existing_files = sorted(
+            cache_dir.glob(f"{symbol}_{self._config.data.timeframe}_*.parquet")
+        )
         for existing in existing_files:
             try:
                 cached_df = _load_parquet(existing)
@@ -493,7 +499,9 @@ class DataFetcher:
             or an empty DataFrame if no cache files exist.
         """
         symbol = symbol.upper()
-        files = sorted(self._cache_dir.glob(f"{symbol}_{self._config.data.timeframe}_*.parquet"))
+        files = sorted(
+            self._cache_dir.glob(f"{symbol}_{self._config.data.timeframe}_*.parquet")
+        )
         if not files:
             logger.warning(
                 "No cached files found for %s in %s.", symbol, self._cache_dir

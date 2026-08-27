@@ -74,6 +74,7 @@ try:
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
     _ALPACA_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _ALPACA_AVAILABLE = False
@@ -90,34 +91,41 @@ except ImportError:  # pragma: no cover
 
 _TIMEFRAME_MAP: dict[str, object] = {}  # populated lazily after import check
 _STANDARD_COLUMNS: list[str] = [
-    "timestamp", "open", "high", "low", "close", "volume", "vwap", "trade_count"
+    "timestamp",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "vwap",
+    "trade_count",
 ]
 _MAX_RETRIES: int = 3
 _BACKOFF_BASE_SECONDS: float = 2.0  # wait = base ^ attempt  (2, 4, 8 seconds)
 
 
 def _get_timeframe(timeframe_str: str) -> TimeFrame:
-    """Convert any supported Alpaca timeframe string to a TimeFrame object."""                                                                                                   
-    tf = timeframe_str.strip()                                                                                                                                                   
-                                                                                                                                                                                    
-    # Minute                                                                                                                                                                     
-    m = re.match(r"^(\d+)(Min|min|T)$", tf)                                                                                                                                      
-    if m:                                                                                                                                                                        
+    """Convert any supported Alpaca timeframe string to a TimeFrame object."""
+    tf = timeframe_str.strip()
+
+    # Minute
+    m = re.match(r"^(\d+)(Min|min|T)$", tf)
+    if m:
         return TimeFrame(int(m.group(1)), TimeFrameUnit.Minute)
-    
+
     # Hour
     m = re.match(r"^(\d+)(Hour|hour|H)$", tf)
     if m:
         return TimeFrame(int(m.group(1)), TimeFrameUnit.Hour)
-    
+
     # Day
     if tf in {"1Day", "1day", "1D", "D"}:
         return TimeFrame.Day
-    
+
     # Week
     if tf in {"1Week", "1week", "1W", "W"}:
         return TimeFrame.Week
-        
+
     # Month
     m = re.match(r"^(\d+)(Month|month|M)$", tf)
     if m:
@@ -147,14 +155,13 @@ def _get_feed_enum(feed_str: str) -> object:
     elif feed_lower == "sip":
         return DataFeed.SIP
     else:
-        raise ValueError(
-            f"Unsupported data feed '{feed_str}'. Must be 'iex' or 'sip'."
-        )
+        raise ValueError(f"Unsupported data feed '{feed_str}'. Must be 'iex' or 'sip'.")
 
 
 # ---------------------------------------------------------------------------
 # Credential loading
 # ---------------------------------------------------------------------------
+
 
 def _load_credentials(
     api_key: Optional[str],
@@ -188,7 +195,9 @@ def _load_credentials(
     if not api_key:
         missing.append("PAPER_APCA_API_KEY_ID" if is_paper else "APCA_API_KEY_ID")
     if not secret_key:
-        missing.append("PAPER_APCA_API_SECRET_KEY" if is_paper else "APCA_API_SECRET_KEY")
+        missing.append(
+            "PAPER_APCA_API_SECRET_KEY" if is_paper else "APCA_API_SECRET_KEY"
+        )
 
     if missing:
         raise DataFetchError(
@@ -204,6 +213,7 @@ def _load_credentials(
 # ---------------------------------------------------------------------------
 # DataFrame normalisation
 # ---------------------------------------------------------------------------
+
 
 def _normalise_bars_df(raw_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     """Convert a raw Alpaca bars DataFrame to the standard ORB schema.
@@ -261,9 +271,9 @@ def _normalise_bars_df(raw_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
         df["vwap"] = pd.to_numeric(df["vwap"], errors="coerce")
 
     if "trade_count" in df.columns:
-        df["trade_count"] = pd.to_numeric(
-            df["trade_count"], errors="coerce"
-        ).astype("Int64")
+        df["trade_count"] = pd.to_numeric(df["trade_count"], errors="coerce").astype(
+            "Int64"
+        )
 
     # Keep only the standard columns that are present; add missing ones as NaN
     out_cols: list[str] = []
@@ -279,6 +289,7 @@ def _normalise_bars_df(raw_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Public class
 # ---------------------------------------------------------------------------
+
 
 class AlpacaDataClient:
     """Authenticated Alpaca historical bar client with retry logic.
@@ -319,9 +330,7 @@ class AlpacaDataClient:
         self._backoff_base = backoff_base
         self._is_paper = is_paper
 
-        resolved_key, resolved_secret = _load_credentials(
-            api_key, secret_key, is_paper
-        )
+        resolved_key, resolved_secret = _load_credentials(api_key, secret_key, is_paper)
 
         self._client = StockHistoricalDataClient(
             api_key=resolved_key,
@@ -374,10 +383,12 @@ class AlpacaDataClient:
             end_date = datetime.now(timezone.utc).replace(second=0, microsecond=0)
             # Subtract 16 minutes to avoid IEX 15-minute delay on current day
             from datetime import timedelta
+
             end_date = end_date - timedelta(minutes=16)
 
         if start_date is None:
             from datetime import timedelta
+
             start_date = end_date - timedelta(days=5)
 
         # ── Ensure UTC-awareness ─────────────────────────────────────
@@ -391,7 +402,8 @@ class AlpacaDataClient:
 
         logger.info(
             "Fetching %s bars for %s | %s → %s | feed=%s",
-            timeframe, symbol,
+            timeframe,
+            symbol,
             start_date.strftime("%Y-%m-%d %H:%M UTC"),
             end_date.strftime("%Y-%m-%d %H:%M UTC"),
             feed.upper(),
@@ -430,10 +442,13 @@ class AlpacaDataClient:
                         end_date=end_date.strftime("%Y-%m-%d"),
                     ) from exc
 
-                wait = self._backoff_base ** attempt
+                wait = self._backoff_base**attempt
                 logger.warning(
                     "Alpaca API error (attempt %d/%d) — retrying in %.1fs. Error: %s",
-                    attempt, self._max_retries, wait, exc_str,
+                    attempt,
+                    self._max_retries,
+                    wait,
+                    exc_str,
                 )
                 time.sleep(wait)
 
@@ -441,7 +456,8 @@ class AlpacaDataClient:
 
         logger.info(
             "Fetched %d bars for %s. Range: %s → %s",
-            len(df), symbol,
+            len(df),
+            symbol,
             df["timestamp"].min() if not df.empty else "N/A",
             df["timestamp"].max() if not df.empty else "N/A",
         )
