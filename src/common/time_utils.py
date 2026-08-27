@@ -161,18 +161,8 @@ def to_eastern(
         )
 
     out = df.copy()
-    series: pd.Series = pd.to_datetime(out[time_col])
-
-    if series.dt.tz is None:
-        # Naive → assume UTC → convert to Eastern
-        series = series.dt.tz_localize("UTC").dt.tz_convert(EASTERN_TZ)
-    else:
-        tz_name = str(series.dt.tz)
-        if tz_name != EASTERN_TZ:
-            series = series.dt.tz_convert(EASTERN_TZ)
-        # else: already Eastern — leave as-is
-
-    out[time_col] = series
+    series: pd.Series = pd.to_datetime(out[time_col], utc=True)
+    out[time_col] = series.dt.tz_convert(EASTERN_TZ)
     return out
 
 
