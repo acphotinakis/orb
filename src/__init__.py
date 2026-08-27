@@ -1,5 +1,5 @@
 """
-orb-spy-alpaca: SPY Opening Range Breakout quantitative trading system.
+orb-spy-alpaca: Opening Range Breakout quantitative trading system.
 
 This package provides the full pipeline for data ingestion, strategy signal
 generation, event-driven backtesting, performance evaluation, and

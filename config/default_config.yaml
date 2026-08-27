@@ -14,7 +14,7 @@ parameters:
 
 strategy:
   opening_range_minutes: 15      # 9:30 - 9:45 AM ET
-  target_r: 2.0                  # 2R profit target
+  target_r: 1.5                  # 2R profit target
   breakout_buffer_pct: 0.0       # 0% buffer beyond range
   breakout_confirmation: "close" # "close" or "intrabar"
   max_trades_per_day: 1          # Max 1 trade per session

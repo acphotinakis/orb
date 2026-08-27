@@ -126,7 +126,7 @@ class ResultsReporter:
         strat = metrics.get("strategy", {})
 
         print("\n" + "=" * 65)
-        print(f"       SPY OPENING RANGE BREAKOUT (ORB) PERFORMANCE REPORT       ")
+        print(f"       OPENING RANGE BREAKOUT (ORB) PERFORMANCE REPORT       ")
         print("=" * 65)
 
         if strat:

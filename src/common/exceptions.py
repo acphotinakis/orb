@@ -1,7 +1,7 @@
 """
 src.common.exceptions
 =====================
-Domain-specific exception hierarchy for the SPY Opening Range Breakout (ORB)
+Domain-specific exception hierarchy for the Symbol Opening Range Breakout (ORB)
 quantitative trading system.
 
 All ORB-specific exceptions inherit from :class:`ORBBaseException` so that
