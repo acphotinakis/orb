@@ -10,7 +10,7 @@ entry/exit points, Stop Loss, Take Profit lines, and trade outcome annotations.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 import matplotlib
 matplotlib.use("Agg")  # Non-interactive headless backend
 import matplotlib.pyplot as plt
@@ -27,8 +27,18 @@ logger = get_logger(__name__)
 class CandlestickTradePlotter:
     """Renders session candlestick charts with OR boxes and execution markers."""
 
-    def __init__(self, output_dir: str = "plots/trades") -> None:
-        self.output_dir = Path(output_dir)
+    def __init__(
+        self,
+        output_dir: Optional[Union[str, Path]] = None,
+    ) -> None:
+        """Initialise the CandlestickTradePlotter.
+
+        Args:
+            output_dir: Directory for trade chart PNGs. When injected from
+                PathManager, this should be a pre-resolved :class:`Path`.
+                Defaults to ``"plots/trades"``.
+        """
+        self.output_dir = Path(output_dir) if output_dir is not None else Path("plots/trades")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def plot_trade_session(

@@ -19,12 +19,9 @@ from src.common.config import load_config
 
 def test_pipeline_e2e_execution(tmp_path: Path):
     """Runs full ORBPipeline on multi-day synthetic cached data and asserts all outputs."""
-    # 1. Setup isolated directories in tmp_path
-    raw_dir = tmp_path / "data" / "raw" / "SPY"
-    proc_dir = tmp_path / "data" / "processed" / "SPY"
-    results_dir = tmp_path / "results"
-    plots_dir = tmp_path / "plots"
-
+    # 1. Setup isolated directories in tmp_path following PathManager layout
+    # data/raw/{symbol}/{feed}/{timeframe}/
+    raw_dir = tmp_path / "data" / "raw" / "SPY" / "sip" / "1Min"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     # 2. Seed 3 days of synthetic 1-minute bars in raw cache
@@ -76,18 +73,17 @@ def test_pipeline_e2e_execution(tmp_path: Path):
         all_bars.append(df_day)
 
     raw_combined = pd.concat(all_bars, ignore_index=True)
-    cache_file = raw_dir / "SPY_1min_20240102_20240104.parquet"
-    raw_combined.to_parquet(cache_file, engine="pyarrow", index=False)
+    cache_file = raw_dir / "SPY_1Min_20240102_20240104.parquet"
+    raw_combined.to_parquet(cache_file, engine="pyarrow", compression="zstd", index=False)
 
-    # 3. Configure and run pipeline
+    # 3. Configure and run pipeline using tmp_path as root base_dir
     base_cfg = load_config("config/default_config.yaml")
     cfg = dataclasses.replace(
         base_cfg,
-        data=dataclasses.replace(base_cfg.data, raw_dir=str(raw_dir), processed_dir=str(proc_dir)),
-        output=dataclasses.replace(base_cfg.output, results_dir=str(results_dir), plots_dir=str(plots_dir)),
+        data=dataclasses.replace(base_cfg.data, timeframe="1Min"),
     )
 
-    pipeline = ORBPipeline(config=cfg)
+    pipeline = ORBPipeline(config=cfg, base_dir=tmp_path)
     run_id = "test_e2e_run"
     result = pipeline.run(
         start_date="2024-01-02",
@@ -95,6 +91,7 @@ def test_pipeline_e2e_execution(tmp_path: Path):
         refresh_cache=False,
         generate_plots=True,
         run_id=run_id,
+        base_dir=tmp_path,
     )
 
     # 4. Assertions on result objects
@@ -102,20 +99,23 @@ def test_pipeline_e2e_execution(tmp_path: Path):
     assert result.total_trades == 3
     assert result.execution_time_seconds > 0
 
-    # 5. Assert all files written to disk
-    run_res_dir = results_dir / run_id
+    # 5. Assert all files written to disk in experiment directory
+    exp_dir = tmp_path / "experiments" / f"{run_id}__SPY_1Min_20240102_20240104"
+    run_res_dir = exp_dir / "results"
     assert (run_res_dir / "trades.csv").exists()
     assert (run_res_dir / "equity_curve.csv").exists()
     assert (run_res_dir / "daily_summary.csv").exists()
     assert (run_res_dir / "metrics.json").exists()
+    assert (exp_dir / "config_snapshot.yaml").exists()
 
     # Verify plots
-    assert (plots_dir / "equity_curves" / "equity_curve.png").exists()
-    assert (plots_dir / "drawdowns" / "drawdown_curve.png").exists()
-    assert (plots_dir / "distributions" / "r_multiples.png").exists()
-    assert (plots_dir / "distributions" / "trade_durations.png").exists()
+    plots_out = exp_dir / "plots"
+    assert (plots_out / "equity_curves" / "equity_curve.png").exists()
+    assert (plots_out / "drawdowns" / "drawdown_curve.png").exists()
+    assert (plots_out / "distributions" / "r_multiples.png").exists()
+    assert (plots_out / "distributions" / "trade_durations.png").exists()
 
-    trade_plots = list((plots_dir / "trades").glob("trade_*.png"))
+    trade_plots = list((plots_out / "trades").glob("trade_*.png"))
     assert len(trade_plots) == 3
 
 

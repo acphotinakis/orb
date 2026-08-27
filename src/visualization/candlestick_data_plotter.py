@@ -28,10 +28,18 @@ class CandlestickDataPlotter:
 
     def __init__(
         self,
-        output_dir: Union[str, Path] = "plots/candlesticks",
+        output_dir: Optional[Union[str, Path]] = None,
         filename: Optional[str] = None,
     ) -> None:
-        self.output_dir = Path(output_dir)
+        """Initialise the CandlestickDataPlotter.
+
+        Args:
+            output_dir: Directory for candlestick chart PNGs. When injected
+                from PathManager, this should be a pre-resolved :class:`Path`.
+                Defaults to ``"plots/candlesticks"``.
+            filename: Optional default filename stem for saved charts.
+        """
+        self.output_dir = Path(output_dir) if output_dir is not None else Path("plots/candlesticks")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.filename = filename
 

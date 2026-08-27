@@ -18,7 +18,7 @@ Cache File Naming
 -----------------
 Files are written to::
 
-    data/raw/{symbol}/{symbol}_{timeframe}_{YYYYMMDD}_{YYYYMMDD}.parquet
+    data/raw/{symbol}/{feed}/{timeframe}/{symbol}_{timeframe}_{YYYYMMDD}_{YYYYMMDD}.parquet
 
 where the two dates are the ISO start and end of the *actual downloaded*
 data range (from the earliest to the latest timestamp in the file, not the
@@ -172,10 +172,11 @@ def _load_parquet(path: Path) -> pd.DataFrame:
         DataFrame with ``timestamp`` as a UTC-aware ``datetime64`` column.
 
     Raises:
-        DataFetchError: If the file cannot be read.
+        DataFetchError: If the file cannot be read or is missing required columns.
     """
     try:
-        df = pd.read_parquet(path, engine=_PARQUET_ENGINE) # type: ignore
+        df = pd.read_parquet(path, engine=_PARQUET_ENGINE)  # type: ignore
+        _validate_columns(df, context=f"load_parquet({path.name})")
         logger.debug("Loaded %d bars from cache: %s", len(df), path.name)
         return df
     except Exception as exc:
@@ -183,7 +184,7 @@ def _load_parquet(path: Path) -> pd.DataFrame:
 
 
 def _write_parquet(df: pd.DataFrame, path: Path) -> None:
-    """Persist a bars DataFrame to Parquet using the ``pyarrow`` engine.
+    """Persist a bars DataFrame to Parquet using the ``pyarrow`` engine and zstd compression.
 
     Args:
         df: Bars DataFrame to write.
@@ -194,8 +195,8 @@ def _write_parquet(df: pd.DataFrame, path: Path) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        df.to_parquet(path, engine=_PARQUET_ENGINE, index=False)
-        logger.debug("Cached %d bars → %s", len(df), path.name)
+        df.to_parquet(path, engine=_PARQUET_ENGINE, compression="zstd", index=False)
+        logger.debug("Cached %d bars → %s (zstd compression)", len(df), path.name)
     except Exception as exc:
         raise DataFetchError(f"Failed to write cache file '{path}': {exc}") from exc
 
@@ -249,16 +250,33 @@ class DataFetcher:
         config: Loaded :class:`~src.common.config.AppConfig` instance.
         client: Optional pre-constructed :class:`AlpacaDataClient`.  If
             ``None``, a new client is built from *config* on first fetch.
+        cache_dir: Optional directory path for raw Parquet cache.  When
+            provided by :class:`~src.common.paths.PathManager`, this
+            overrides the default path construction.
     """
 
     def __init__(
         self,
         config: AppConfig,
         client: Optional[AlpacaDataClient] = None,
+        cache_dir: Optional[Path] = None,
     ) -> None:
+        """Initialise the DataFetcher.
+
+        Args:
+            config: Loaded AppConfig instance.
+            client: Optional pre-constructed AlpacaDataClient.
+            cache_dir: Directory for raw Parquet cache files. When provided
+                (from PathManager), this overrides any default path logic.
+        """
         self._config = config
         self._client: Optional[AlpacaDataClient] = client
-        self._cache_dir = Path(config.data.raw_dir)                                                                                        
+        # Accept injected path from PathManager; fall back to a sensible default
+        self._cache_dir: Path = (
+            cache_dir
+            if cache_dir is not None
+            else Path("data") / "raw" / config.data.symbol / config.data.feed / config.data.timeframe
+        )
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -272,7 +290,7 @@ class DataFetcher:
         """
         if self._client is None:
             logger.debug("Initialising AlpacaDataClient from config credentials.")
-            self._client = AlpacaDataClient(is_paper=True)
+            self._client = AlpacaDataClient(is_paper=self._config.data.is_paper)
         return self._client
 
     def _fetch_from_alpaca(
@@ -417,7 +435,7 @@ class DataFetcher:
 
         # ── Merge with any partial existing cache ────────────────────
         frames_to_merge: list[pd.DataFrame] = [fresh_df]
-        existing_files = sorted(cache_dir.glob(f"{symbol}_1min_*.parquet"))
+        existing_files = sorted(cache_dir.glob(f"{symbol}_{self._config.data.timeframe}_*.parquet"))
         for existing in existing_files:
             try:
                 cached_df = _load_parquet(existing)
@@ -475,7 +493,7 @@ class DataFetcher:
             or an empty DataFrame if no cache files exist.
         """
         symbol = symbol.upper()
-        files = sorted(self._cache_dir.glob(f"{symbol}_1min_*.parquet"))
+        files = sorted(self._cache_dir.glob(f"{symbol}_{self._config.data.timeframe}_*.parquet"))
         if not files:
             logger.warning(
                 "No cached files found for %s in %s.", symbol, self._cache_dir

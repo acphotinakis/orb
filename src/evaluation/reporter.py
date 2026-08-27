@@ -23,27 +23,50 @@ logger = get_logger(__name__)
 class ResultsReporter:
     """Orchestrates formatting and disk persistence of backtest artifacts."""
 
-    def __init__(self, base_results_dir: str = "results/backtest") -> None:
-        self.base_dir = Path(base_results_dir)
+    def __init__(
+        self,
+        output_dir: Optional[Path] = None,
+        base_results_dir: Optional[str] = None,
+    ) -> None:
+        """Initialise the ResultsReporter.
+
+        Args:
+            output_dir: Fully-resolved output directory (from PathManager).
+                When provided, ``base_results_dir`` is ignored.
+            base_results_dir: Legacy fallback base directory. Used only when
+                ``output_dir`` is ``None``.
+        """
+        if output_dir is not None:
+            self.output_dir = output_dir
+            self._using_path_manager = True
+        elif base_results_dir is not None:
+            self.output_dir = Path(base_results_dir)
+        else:
+            self.output_dir = Path("results/backtest")
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def export_all(
         self,
         backtest_result: BacktestResult,
         metrics: Dict[str, Any],
-        run_id: str = "SPY_baseline_v1",
+        run_id: Optional[str] = None,
     ) -> Dict[str, Path]:
-        """Exports trades.csv, equity_curve.csv, daily_summary.csv, and metrics.json.
+        """Export trades.csv, equity_curve.csv, daily_summary.csv, and metrics.json.
 
         Args:
             backtest_result: Output container from BacktestEngine.run()
             metrics: Performance metrics dictionary from generate_performance_report()
-            run_id: Directory name identifier under results/backtest/
+            run_id: Deprecated. Ignored when output_dir was provided at init.
 
         Returns:
             Dict mapping artifact names to their written Path objects.
         """
-        run_dir = self.base_dir / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
+        # If run_id provided but no PathManager was used, fall back to old behaviour
+        if run_id is not None and not hasattr(self, '_using_path_manager'):
+            run_dir = self.output_dir / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            run_dir = self.output_dir
 
         artifact_paths: Dict[str, Path] = {}
 
@@ -52,6 +75,16 @@ class ResultsReporter:
         trades_df = backtest_result.trades_df.copy()
         if trades_df.empty and backtest_result.trades:
             trades_df = pd.DataFrame([t.to_dict() for t in backtest_result.trades])
+        
+        # Round price and financial metrics to 4 decimal places for compact storage
+        if not trades_df.empty:
+            price_cols = [
+                c for c in trades_df.columns
+                if any(k in c.lower() for k in ["price", "pnl", "capital", "equity", "r_multiple", "slippage", "commission"])
+                and pd.api.types.is_float_dtype(trades_df[c])
+            ]
+            trades_df[price_cols] = trades_df[price_cols].round(4)
+
         trades_df.to_csv(trades_path, index=False)
         artifact_paths["trades_csv"] = trades_path
 
@@ -71,7 +104,7 @@ class ResultsReporter:
             json.dump(metrics, f, indent=2, default=str)
         artifact_paths["metrics_json"] = metrics_path
 
-        logger.info("Successfully exported 4 backtest artifacts to %s", run_dir)
+        logger.info("Exported 4 backtest artifacts to %s", run_dir)
         return artifact_paths
 
     def display_console_summary(self, metrics: Dict[str, Any]) -> None:

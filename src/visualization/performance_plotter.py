@@ -13,7 +13,7 @@ Generates high-resolution PNG charts:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -30,11 +30,29 @@ logger = get_logger(__name__)
 class PerformancePlotter:
     """Renders portfolio equity curves, drawdowns, and trade distribution charts."""
 
-    def __init__(self, plots_base_dir: str = "plots") -> None:
-        self.base_dir = Path(plots_base_dir)
-        self.equity_dir = self.base_dir / "equity_curves"
-        self.dd_dir = self.base_dir / "drawdowns"
-        self.dist_dir = self.base_dir / "distributions"
+    def __init__(
+        self,
+        plots_base_dir: Optional[Union[str, Path]] = None,
+        equity_dir: Optional[Path] = None,
+        drawdown_dir: Optional[Path] = None,
+        distributions_dir: Optional[Path] = None,
+    ) -> None:
+        """Initialise the PerformancePlotter.
+
+        Accepts either individual pre-resolved directory paths (from
+        PathManager) or a single base directory string (legacy).
+
+        Args:
+            plots_base_dir: Legacy base directory. Used when individual dirs
+                are not provided.
+            equity_dir: Pre-resolved equity curves directory.
+            drawdown_dir: Pre-resolved drawdowns directory.
+            distributions_dir: Pre-resolved distributions directory.
+        """
+        base = Path(plots_base_dir or "plots")
+        self.equity_dir = equity_dir if equity_dir is not None else base / "equity_curves"
+        self.dd_dir = drawdown_dir if drawdown_dir is not None else base / "drawdowns"
+        self.dist_dir = distributions_dir if distributions_dir is not None else base / "distributions"
 
         for d in (self.equity_dir, self.dd_dir, self.dist_dir):
             d.mkdir(parents=True, exist_ok=True)

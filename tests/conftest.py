@@ -47,8 +47,7 @@ def mock_app_config() -> AppConfig:
             feed="iex",
             timeframe="1Min",
             timezone="America/New_York",
-            raw_dir="data/raw/SPY",
-            processed_dir="data/processed/SPY",
+            is_paper=True,
         ),
         execution=ExecutionConfig(
             initial_capital=100_000.0,

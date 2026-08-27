@@ -29,11 +29,11 @@ filters:
   market_regime_filter_enabled: false
 
 data:
+  symbol: "SPY"
+  feed: "sip"                   # "sip" (default) or "iex"
   timeframe: "15Min"
   timezone: "America/New_York"
-  # plots_dirs: "data/processed/SPY"
-  # raw_dir: "data/raw/SPY"
-  # processed_dir: "data/processed/SPY"
+  is_paper: true                # true = paper trading, false = live
 
 execution:
   initial_capital: 100000.0

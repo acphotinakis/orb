@@ -66,7 +66,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _PARQUET_ENGINE: str = "pyarrow"
-_COMPRESSION:    str = "snappy"
+_COMPRESSION:    str = "zstd"
 _OR_OUTPUT_FILENAME: str = "daily_ranges.parquet"
 
 # Required columns from the processed dataset (TASK-008 output)
@@ -357,10 +357,11 @@ class OpeningRangeCalculator:
     # Persistence
     # ------------------------------------------------------------------
 
-    def save_ranges(
-        self,
+    @staticmethod
+    def save_daily_ranges(
         ranges: Dict[str, OpeningRange],
-        output_dir: Path,
+        output_dir: Optional[Path] = None,
+        output_path: Optional[Path] = None,
     ) -> Path:
         """Serialise computed opening ranges to a Parquet file.
 
@@ -368,6 +369,7 @@ class OpeningRangeCalculator:
             ranges: Dictionary of ``session_id → OpeningRange`` as returned
                 by :meth:`calculate_all`.
             output_dir: Directory in which ``daily_ranges.parquet`` is written.
+            output_path: Direct file path override (e.g. from PathManager).
 
         Returns:
             Path to the written Parquet file.
@@ -387,14 +389,20 @@ class OpeningRangeCalculator:
             })
 
         out_df = pd.DataFrame(records)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        out_path = output_dir / _OR_OUTPUT_FILENAME
+        if output_path is not None:
+            out_path = output_path
+        elif output_dir is not None:
+            out_path = output_dir / _OR_OUTPUT_FILENAME
+        else:
+            out_path = Path("data/processed") / _OR_OUTPUT_FILENAME
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
 
         out_df.to_parquet(
             out_path, engine=_PARQUET_ENGINE, compression=_COMPRESSION, index=False
         )
         logger.info(
-            "Saved %d opening ranges → %s", len(out_df), out_path
+            "Saved %d opening ranges → %s (zstd compression)", len(out_df), out_path
         )
         return out_path
 

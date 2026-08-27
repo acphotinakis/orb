@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 from src.common.logger import get_logger
 
 import yaml                                                                                                                                                                               
@@ -109,17 +109,15 @@ class DataConfig:
             valid time frame.
         timezone: IANA timezone name used for all timestamp normalisation.
             Must be ``"America/New_York"``.
-        raw_dir: Relative path for raw Parquet bar cache.
-        processed_dir: Relative path for processed RTH session Parquet files.
+        is_paper: When ``True``, use paper trading credentials; when
+            ``False``, use live trading credentials.
     """
 
     symbol: str = "SPY"
     feed: str = "sip"
     timeframe: str = "1Min"
     timezone: str = "America/New_York"
-    raw_dir: str = "data/raw/SPY"
-    processed_dir: str = "data/processed/SPY"
-    plots_dir: str = "data/plots/SPY"
+    is_paper: bool = True
 
 
 @dataclass(frozen=True)
@@ -190,8 +188,33 @@ class AppConfig:
             Nested dictionary representation suitable for JSON serialisation.
         """
         import dataclasses as dc
-
         return dc.asdict(self)
+
+    def to_json(self, indent: int = 2) -> str:
+        """Return a JSON string representation of this config.
+
+        Args:
+            indent: JSON indentation level. Default is 2.
+
+        Returns:
+            Pretty-printed JSON string.
+        """
+        import json
+        import dataclasses as dc
+        return json.dumps(dc.asdict(self), indent=indent, default=str)
+
+    def to_yaml(self, path: Union[str, Path]) -> None:
+        """Write a frozen snapshot of this config to a YAML file.
+
+        Args:
+            path: Destination YAML file path. Parent directories are
+                created automatically.
+        """
+        import dataclasses as dc
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as fh:
+            yaml.dump(dc.asdict(self), fh, default_flow_style=False, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +258,25 @@ def is_valid_timeframe(tf: str) -> bool:
         return False                                                                                                                                                             
     # Ensure minute values are between 1 and 59, hour between 1 and 23                                                                                                           
     return True                                                                                                                                                                  
+
+def _deep_update(target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge *source* into *target*, skipping ``None`` values.
+
+    Args:
+        target: Base dictionary to update in place.
+        source: Override dictionary whose values take priority.
+
+    Returns:
+        The mutated *target* dictionary.
+    """
+    for k, v in source.items():
+        if v is None:
+            continue
+        if isinstance(v, dict) and k in target and isinstance(target[k], dict):
+            _deep_update(target[k], v)
+        else:
+            target[k] = v
+    return target
 
 def validate_config(config: AppConfig) -> None:
     """Validate all domain constraints on a loaded ``AppConfig``.
@@ -369,11 +411,6 @@ def validate_config(config: AppConfig) -> None:
             field="execution.position_sizing",
         )
 
-    import json 
-    from dataclasses import asdict
-    config_json = json.dumps(asdict(config), default=str)                                                                                                                            
-    logger.info(f"Config: {config_json}")                                                                                                                                            
-
 # ---------------------------------------------------------------------------
 # Private YAML → dataclass mapping helpers
 # ---------------------------------------------------------------------------
@@ -437,33 +474,25 @@ def _build_filters(raw: Dict[str, Any]) -> FiltersConfig:
 
 
 def _build_data(raw: Dict[str, Any]) -> DataConfig:
-    """Construct a :class:`DataConfig` from a raw YAML mapping.                                                                                                                  
-                                                                                                                                                                                    
-    Args:                                                                                                                                                                        
-        raw: The ``data:`` sub-dict from the loaded YAML.                                                                                                                        
-                                                                                                                                                                                    
-    Returns:                                                                                                                                                                     
-        Populated :class:`DataConfig` instance.                                                                                                                                  
-    """                                                                                                                                                                          
-    defaults = DataConfig()                                                                                                                                                      
-    symbol = str(raw.get("symbol", defaults.symbol))                                                                                                                             
-    timeframe = str(raw.get("timeframe", defaults.timeframe))                                                                                                                    
-                                                                                                                                                                                    
-    # Construct default directories based on symbol and timeframe                                                                                                                
-    default_raw_dir = str(raw.get("raw_dir", f"data/raw/{symbol}_{timeframe}"))                                                                                                  
-    default_processed_dir = str(raw.get("processed_dir", f"data/processed/{symbol}_{timeframe}"))     
-    default_plots_dir = str(raw.get("plots_dir", f"data/plots/{symbol}_{timeframe}"))                                                                                
-                                                                                                                                                                                    
-    return DataConfig(                                                                                                                                                           
-        symbol=symbol,                                                                                                                                                           
-        feed=str(raw.get("feed", defaults.feed)),                                                                                                                                
-        timeframe=timeframe,                                                                                                                                                     
-        timezone=str(raw.get("timezone", defaults.timezone)),                                                                                                                    
-        raw_dir=default_raw_dir,                                                                                                                                                 
-        processed_dir=default_processed_dir,         
-        plots_dir=default_plots_dir                                                                                                                             
-    )                                                                                                                                                                            
+    """Construct a :class:`DataConfig` from a raw YAML mapping.
 
+    Args:
+        raw: The ``data:`` sub-dict from the loaded YAML.
+
+    Returns:
+        Populated :class:`DataConfig` instance.
+    """
+    defaults = DataConfig()
+    symbol = str(raw.get("symbol", defaults.symbol))
+    timeframe = str(raw.get("timeframe", defaults.timeframe))
+
+    return DataConfig(
+        symbol=symbol,
+        feed=str(raw.get("feed", defaults.feed)),
+        timeframe=timeframe,
+        timezone=str(raw.get("timezone", defaults.timezone)),
+        is_paper=bool(raw.get("is_paper", defaults.is_paper)),
+    )
 
 def _build_execution(raw: Dict[str, Any]) -> ExecutionConfig:
     """Construct an :class:`ExecutionConfig` from a raw YAML mapping.
@@ -514,18 +543,24 @@ def _build_output(raw: Dict[str, Any]) -> OutputConfig:
 
 def load_config(
     config_path: Union[str, Path] = "config/default_config.yaml",
+    overrides: Optional[Dict[str, Any]] = None,
 ) -> AppConfig:
     """Load, parse, and validate an ORB system configuration from a YAML file.
 
-    This is the primary entry point for configuration management.  It:
-
-    1. Reads the YAML file from *config_path*.
-    2. Maps each top-level section to a frozen dataclass.
-    3. Calls :func:`validate_config` to enforce domain constraints.
+    Supports a layered override system — values in *overrides* take precedence
+    over the YAML file, which in turn takes precedence over dataclass defaults.
+    This enables CLI or programmatic parameter sweeps without modifying YAML.
 
     Args:
         config_path: Path to the YAML configuration file.  Relative paths are
             resolved from the current working directory.
+        overrides: Optional nested dictionary of values to merge on top of the
+            loaded YAML.  Mirrors the YAML section structure, e.g.::
+
+                overrides = {
+                    "strategy": {"ticker": "NVDA", "opening_range_minutes": 5},
+                    "data": {"timeframe": "5Min"},
+                }
 
     Returns:
         A fully validated, immutable :class:`AppConfig` instance.
@@ -540,6 +575,9 @@ def load_config(
         from src.common.config import load_config
         cfg = load_config()
         print(cfg.strategy.opening_range_minutes)  # 15
+
+        # With CLI overrides:
+        cfg = load_config(overrides={"data": {"timeframe": "5Min"}})
     """
     path = Path(config_path)
     if not path.exists():
@@ -550,6 +588,10 @@ def load_config(
 
     with path.open("r", encoding="utf-8") as fh:
         raw: Dict[str, Any] = yaml.safe_load(fh) or {}
+
+    # Apply overrides — CLI / programmatic values take precedence over YAML
+    if overrides:
+        _deep_update(raw, overrides)
 
     # Build each sub-config, using empty dicts when a section is absent so
     # that default field values are used cleanly.
@@ -562,4 +604,7 @@ def load_config(
         output=_build_output(raw.get("output", {})),
     )
 
+    # Always validate — callers do not need to call validate_config() separately
+    validate_config(config)
+    logger.info("Config loaded: %s", config.to_json())
     return config

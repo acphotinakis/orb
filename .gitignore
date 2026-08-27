@@ -5,3 +5,14 @@ __pycache__/
 *.parquet
 *.png
 results/backtest
+
+# ── Experiment output artifacts ────────────────────────────────────────────
+# All run artifacts are stored in experiments/ and data/ — do not commit these.
+experiments/
+data/raw/
+data/processed/
+
+# Keep config, docs, and source code
+!config/
+!docs/
+!src/

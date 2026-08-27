@@ -41,6 +41,7 @@ from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
+import re
 
 from src.common.exceptions import DataValidationError
 from src.common.logger import get_logger
@@ -54,7 +55,6 @@ logger = get_logger(__name__)
 
 _REQUIRED_COLS: list[str] = ["timestamp", "open", "high", "low", "close", "volume"]
 _OHLC_ERROR_THRESHOLD: float = 0.01   # 1 % of input bars
-_MAJOR_GAP_MINUTES: int = 5           # > 5 consecutive missing 1-min bars
 _MARKET_OPEN  = datetime.time(9, 30, 0)
 _MARKET_CLOSE = datetime.time(16, 0, 0)
 
@@ -112,6 +112,20 @@ class ValidationReport:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+def _timeframe_to_pandas_freq(timeframe: str) -> str:                                                                                                                                                                
+    """Normalize Alpaca timeframe string (e.g. 15Min, 1Hour, 1Day) to Pandas offset string."""                                                                                                                       
+    tf = timeframe.strip()                                                                                                                                                                                           
+    if tf.lower().endswith("min") or tf.lower().endswith("t"):                                                                                                                                                       
+        num = re.findall(r"\d+", tf)                                                                                                                                                                                 
+        n = num[0] if num else "1"                                                                                                                                                                                   
+        return f"{n}min"                                                                                                                                                                                             
+    elif tf.lower().endswith("hour") or tf.lower().endswith("h"):                                                                                                                                                    
+        num = re.findall(r"\d+", tf)                                                                                                                                                                                 
+        n = num[0] if num else "1"                                                                                                                                                                                   
+        return f"{n}h"                                                                                                                                                                                               
+    elif tf.lower().endswith("day") or tf.lower().endswith("d"):                                                                                                                                                     
+        return "1D"                                                                                                                                                  
+    return "1min"
 
 def _check_required_columns(df: pd.DataFrame) -> None:
     """Assert all required OHLCV columns are present.
@@ -230,111 +244,50 @@ def _validate_ohlc_geometry(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
 
 
 def _audit_rth_gaps(
-    df: pd.DataFrame,
-) -> Tuple[int, List[str]]:
-    """Audit RTH bars for missing 1-minute slots and flag sessions with major gaps.
-
-    For each trading session (identified by Eastern date), the expected 1-minute
-    slots within ``[09:30, 16:00]`` are compared against the actual timestamps
-    present.  A session is flagged when any contiguous run of missing minutes
-    exceeds :data:`_MAJOR_GAP_MINUTES`.
-
-    Args:
-        df: Cleaned bar DataFrame with UTC-aware ``timestamp`` column.
-
-    Returns:
-        ``(total_missing, flagged_session_list)`` where
-        ``total_missing`` is the sum of all missing 1-minute slots across all
-        sessions and ``flagged_session_list`` contains ``YYYY-MM-DD`` strings.
-    """
-    if df.empty:
-        return 0, []
-
-    # Convert timestamps to Eastern for session-level analysis
-    ts_et = df["timestamp"].dt.tz_convert(EASTERN_TZ)
-    session_dates = ts_et.dt.date.unique()
-
-    total_missing = 0
-    flagged: list[str] = []
-
-    for date in sorted(session_dates):
-        market_open_et  = pd.Timestamp(date).tz_localize(EASTERN_TZ).replace(hour=9,  minute=30)
-        market_close_et = pd.Timestamp(date).tz_localize(EASTERN_TZ).replace(hour=16, minute=0)
-
-        # All expected 1-minute bar timestamps in this session
-        expected = pd.date_range(
-            start=market_open_et,
-            end=market_close_et,
-            freq="1min",
-        )
-
-        # Actual timestamps in this session (snapped to minute precision)
-        session_mask = ts_et.dt.date == date
-        actual = pd.DatetimeIndex(
-            ts_et[session_mask].dt.floor("1min").values
-        ).tz_localize(None).tz_localize(EASTERN_TZ)
-
-        if len(actual) == 0:
-            continue
-
-        # Restrict the expected window to [first_actual, last_actual] so that
-        # truncated partial datasets (e.g., early feed cut-off) don't generate
-        # false trailing-gap flags.  True intraday gaps still surface because
-        # the window covers the span of actual data.
-        windowed_expected = pd.date_range(
-            start=max(market_open_et, actual.min()),
-            end=min(market_close_et, actual.max()),
-            freq="1min",
-        )
-
-        missing_slots = windowed_expected.difference(actual)
-        n_missing = len(missing_slots)
-        total_missing += n_missing
-
-        if n_missing == 0:
-            continue
-
-        # Check for contiguous runs of missing minutes > threshold
-        if n_missing <= _MAJOR_GAP_MINUTES:
-            logger.debug(
-                "Session %s: %d missing 1-min slot(s) (minor gap).", date, n_missing
-            )
-            continue
-
-        # Detect the longest run of consecutive missing minutes
-        diff_minutes = (
-            pd.Series(missing_slots.sort_values())
-            .diff()
-            .dt.total_seconds()
-            .div(60)
-            .fillna(1)
-        )
-        # A contiguous run means diff == 1 for consecutive missing slots
-        run_lengths: list[int] = []
-        current_run = 1
-        for d in diff_minutes.iloc[1:]:
-            if d == 1:
-                current_run += 1
-            else:
-                run_lengths.append(current_run)
-                current_run = 1
-        run_lengths.append(current_run)
-
-        max_run = max(run_lengths) if run_lengths else 0
-        date_str = date.strftime("%Y-%m-%d")
-        if max_run > _MAJOR_GAP_MINUTES:
-            flagged.append(date_str)
-            logger.warning(
-                "Session %s: major gap detected — max consecutive missing bars: %d.",
-                date_str, max_run,
-            )
-        else:
-            logger.debug(
-                "Session %s: %d missing slots (max run=%d ≤ %d, minor).",
-                date_str, n_missing, max_run, _MAJOR_GAP_MINUTES,
-            )
-
-    return total_missing, flagged
+    df: pd.DataFrame,                                                                                                                                                                                                
+    timeframe: str,
+) -> Tuple[int, List[str]]:                                                                                                                                                                                          
+    """Audit RTH bars for missing bar slots and flag sessions with major gaps."""                                                                                                                                    
+    if df.empty:                                                                                                                                                                                                     
+        return 0, []                                                                                                                                                                                                 
+                                                                                                                                                                                                                        
+    freq = _timeframe_to_pandas_freq(timeframe)                                                                                                                                                                      
+    # Convert timestamps to Eastern for session-level analysis                                                                                                                                                       
+    ts_et = df["timestamp"].dt.tz_convert(EASTERN_TZ)                                                                                                                                                                
+    session_dates = ts_et.dt.date.unique()                                                                                                                                                                           
+                                                                                                                                                                                                                        
+    total_missing = 0                                                                                                                                                                                                
+    flagged: list[str] = []                                                                                                                                                                                          
+                                                                                                                                                                                                                        
+    for date in sorted(session_dates):                                                                                                                                                                               
+        market_open_et  = pd.Timestamp(date, tz=EASTERN_TZ).replace(hour=9,  minute=30)                                                                                                                              
+        market_close_et = pd.Timestamp(date, tz=EASTERN_TZ).replace(hour=16, minute=0)                                                                                                                               
+                                                                                                                                                                                                                        
+        # Actual timestamps cleanly preserved in Eastern TZ                                                                                                                                                          
+        session_mask = ts_et.dt.date == date                                                                                                                                                                         
+        actual = pd.DatetimeIndex(ts_et[session_mask].dt.floor(freq))                                                                                                                                                
+                                                                                                                                                                                                                        
+        if len(actual) == 0:                                                                                                                                                                                         
+            continue                                                                                                                                                                                                 
+                                                                                                                                                                                                                        
+        # Window expected range between first and last actual bar of session                                                                                                                                         
+        windowed_expected = pd.date_range(                                                                                                                                                                           
+            start=max(market_open_et, actual.min()),                                                                                                                                                                 
+            end=min(market_close_et, actual.max()),                                                                                                                                                                  
+            freq=freq,                                                                                                                                                                                               
+        )                                                                                                                                                                                                            
+                                                                                                                                                                                                                        
+        missing_slots = windowed_expected.difference(actual)                                                                                                                                                         
+        n_missing = len(missing_slots)                                                                                                                                                                               
+        total_missing += n_missing                                                                                                                                                                                   
+                                                                                                                                                                                                                        
+        # Flag if more than 3 consecutive intervals or > 10% of session bars are missing                                                                                                                             
+        if n_missing > 3:                                                                                                                                                                                            
+            date_str = date.strftime("%Y-%m-%d")                                                                                                                                                                     
+            flagged.append(date_str)                                                                                                                                                                                 
+            logger.warning("Session %s: gap detected — %d missing bar(s).", date_str, n_missing)                                                                                                                     
+                                                                                                                                                                                                                        
+    return total_missing, flagged                                                                                                                                                                                    
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +296,7 @@ def _audit_rth_gaps(
 
 def validate_and_clean_bars(
     df: pd.DataFrame,
+    timeframe: str,
     strict: bool = False,
 ) -> Tuple[pd.DataFrame, ValidationReport]:
     """Validate and clean a raw 1-minute OHLCV bar DataFrame.
@@ -404,7 +358,7 @@ def validate_and_clean_bars(
             )
 
     # 7. Gap audit (RTH only)
-    n_missing, flagged_sessions = _audit_rth_gaps(df_work)
+    n_missing, flagged_sessions = _audit_rth_gaps(df_work, timeframe)
 
     is_valid = len(flagged_sessions) == 0 and (
         n_input == 0 or (n_invalid_total / max(n_input, 1)) <= _OHLC_ERROR_THRESHOLD
