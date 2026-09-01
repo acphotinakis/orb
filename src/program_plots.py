@@ -7,7 +7,7 @@ from src.backtest.engine import BacktestResult
 
 # 1. Load configuration and saved outputs
 cfg = load_config("config/default_config.yaml")
-run_dir = "results/backtest/SPY_baseline_v1"
+run_dir = "experiments/aapl_15min__AAPL_15Min_20200101_20260801/results"
 
 trades_df = pd.read_csv(f"{run_dir}/trades.csv")
 equity_df = pd.read_csv(f"{run_dir}/equity_curve.csv")

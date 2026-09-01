@@ -186,18 +186,18 @@ class ORBPipeline:
             raise RuntimeError("No historical bars retrieved. Pipeline aborted.")
         logger.info("Raw bars available: %d", len(raw_df))
 
-        if generate_plots:
-            raw_plotter = CandlestickDataPlotter(
-                output_dir=paths.raw_candlestick_plots_dir
-            )
-            raw_plots = raw_plotter.plot_all_sessions(
-                df=raw_df.tail(int(len(raw_df) * 0.2)),
-                stage="raw",
-                symbol=self.config.strategy.ticker,
-                max_plots=20,
-            )
-            for idx, p in enumerate(raw_plots, 1):
-                artifacts[f"raw_candlestick_chart_{idx}"] = p
+        # if generate_plots:
+        #     raw_plotter = CandlestickDataPlotter(
+        #         output_dir=paths.raw_candlestick_plots_dir
+        #     )
+        #     raw_plots = raw_plotter.plot_all_sessions(
+        #         df=raw_df.tail(int(len(raw_df) * 0.2)),
+        #         stage="raw",
+        #         symbol=self.config.strategy.ticker,
+        #         max_plots=20,
+        #     )
+        #     for idx, p in enumerate(raw_plots, 1):
+        #         artifacts[f"raw_candlestick_chart_{idx}"] = p
 
         # ── Step 2: Data Validation & Cleaning ───────────────────────
         logger.info("[2/6] Validating OHLCV bar integrity and checking for gaps...")
