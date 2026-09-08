@@ -30,6 +30,7 @@ from src.data.fetcher import DataFetcher
 from src.data.validator import validate_and_clean_bars
 from src.data.processor import DataProcessor
 from src.backtest.engine import BacktestEngine, BacktestResult
+from src.backtest.trace import TraceCollector
 from src.evaluation.metrics import generate_performance_report
 from src.evaluation.reporter import ResultsReporter
 from src.visualization.candlestick_data_plotter import CandlestickDataPlotter
@@ -86,6 +87,7 @@ class ORBPipeline:
         run_label: Optional[str] = None,
         on_event: Optional[callable] = None,
         cancel_requested: Optional[callable] = None,
+        record_trace: bool = False,
     ) -> PipelineRunResult:
         """Execute the full pipeline workflow from data ingestion to reporting.
 
@@ -113,6 +115,9 @@ class ORBPipeline:
                 and sessions (and every 64 bars).  When true at a boundary,
                 the run stops before further side effects and raises
                 :class:`CancelledRun`.
+            record_trace: When ``True``, capture versioned decision events
+                from the engine into ``results/decision_trace.jsonl`` (P4;
+                explicit opt-in, bounded).
 
         Completion contract (P1-O3): artifacts are published atomically and
         the validated ``manifest.json`` is written last.  Only a present,
@@ -363,8 +368,10 @@ class ORBPipeline:
             event_type = event.pop("event_type", "session_progress")
             _emit(event_type, stage="backtest", **event)
 
+        collector = TraceCollector() if record_trace else None
         backtest_result: BacktestResult = engine.run(
-            processed_df, progress=_engine_event, cancel_requested=cancel_requested
+            processed_df, progress=_engine_event, cancel_requested=cancel_requested,
+            trace=collector,
         )
         if backtest_result.cancelled:
             raise CancelledRun("Run cancelled during simulation.", stage="simulate")
@@ -391,6 +398,23 @@ class ORBPipeline:
             metrics=metrics,
         )
         artifacts.update(exported)
+
+        # ── Decision trace (P4, opt-in) ─────────────────────────────────
+        # Captured from the executing engine above; written before the
+        # manifest so it is checksummed like every other artifact.
+        if collector is not None:
+            from src.services.artifact_store import atomic_write_text
+
+            trace_path = paths.results_dir / "decision_trace.jsonl"
+            atomic_write_text(
+                trace_path, collector.to_jsonl(run_id=run_id)
+            )
+            artifacts["decision_trace"] = trace_path
+            logger.info(
+                "Decision trace recorded: %d events%s.",
+                len(collector.events),
+                " (TRUNCATED)" if collector.truncated else "",
+            )
 
         # ── Visualizations (Portfolio Curves & Trades) ────────────────
         if generate_plots:

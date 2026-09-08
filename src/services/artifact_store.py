@@ -519,9 +519,13 @@ def read_run_artifacts(
     # run_id is the leading component of the experiment directory name
     # ("<run_id>__<symbol>_<tf>_<slug>"); match it exactly, never by substring.
     exp_root = root / "experiments"
+    try:
+        children = list(exp_root.iterdir())
+    except OSError:
+        children = []
     candidates = [
         c
-        for c in exp_root.iterdir()
+        for c in children
         if c.is_dir() and (c.name == run_id or c.name.startswith(run_id + "__"))
     ]
     if not candidates:
@@ -614,17 +618,43 @@ def read_session_bars(
             field="session_id",
         )
     return session
+
+
+def read_trace(
+    storage_root: Union[Path, str], run_id: str
+) -> tuple[Mapping[str, Any], list[Mapping[str, Any]]]:
+    """Read and version-check a run's decision trace (P4).
+
+    Returns ``(header, events)``.  Raises :class:`ConfigurationError` when
+    the run has no trace (tracing is opt-in), and :class:`ValueError` for
+    unknown schema versions — replay never invents missing decisions.
+    """
+    data, _ = read_download_bytes(storage_root, run_id, "results/decision_trace.jsonl")
+    from src.backtest.trace import TraceCollector
+
+    try:
+        return TraceCollector.parse_jsonl(data.decode("utf-8"))
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ConfigurationError(
+            f"Decision trace for '{run_id}' is unreadable: {exc}.",
+            field="artifacts",
+        )
+
+
+#: Artifacts the explorer may serve for download (relative paths, fixed set).
 DOWNLOAD_ALLOWLIST = (
     "results/trades.csv",
     "results/equity_curve.csv",
     "results/daily_summary.csv",
     "results/metrics.json",
+    "results/decision_trace.jsonl",
     "config_snapshot.yaml",
 )
 
 
-def read_download_bytes(
-    storage_root: Union[Path, str], run_id: str, relative_path: str
+def read_download_bytes(    storage_root: Union[Path, str], run_id: str, relative_path: str
 ) -> tuple[bytes, str]:
     """Return ``(bytes, filename)`` for one allowlisted artifact, unchanged."""
     from pathlib import Path as _Path
@@ -636,9 +666,13 @@ def read_download_bytes(
         )
     ensure_safe_component(run_id, field_name="run_id")
     root = _Path(storage_root)
+    try:
+        children = list((root / "experiments").iterdir())
+    except OSError:
+        children = []
     matches = [
         c
-        for c in (root / "experiments").iterdir()
+        for c in children
         if c.is_dir() and (c.name == run_id or c.name.startswith(run_id + "__"))
     ]
     if len(matches) != 1:

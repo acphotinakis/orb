@@ -60,6 +60,97 @@ class Signal:
         )
 
 
+def evaluate_bar_signal(
+    *,
+    close_price: float,
+    timestamp: pd.Timestamp,
+    session_id: str,
+    symbol: str,
+    or_high: float,
+    or_low: float,
+    or_width: float,
+    direction_mode: str,
+    target_r: float,
+    buffer: Optional[float] = None,
+    breakout_buffer_pct: float = 0.0,
+) -> Optional[Signal]:
+    """Shared single-bar breakout decision (P4-O1).
+
+    The one canonical close-breakout rule used by both the backtest engine
+    (per-bar simulation) and :class:`SignalGenerator` (session scans).
+    Behavior is exactly the previously duplicated logic: LONG when
+    ``close > or_high + buffer`` (direction-gated), stop at the opposite
+    boundary, take-profit at ``target_r`` multiples; SHORT mirrored.
+    Degenerate geometry (non-positive risk) and non-breakouts return ``None``.
+
+    Args:
+        close_price: Deciding bar's close.
+        timestamp: Deciding bar's timestamp (bar start; the decision is
+            available one bar duration later — see P1-O4 semantics).
+        session_id: Session the bar belongs to.
+        symbol: Ticker symbol.
+        or_high/or_low/or_width: Frozen opening-range geometry.
+        direction_mode: ``"both"``, ``"long_only"``, or ``"short_only"``.
+        target_r: Reward-to-risk multiple.
+        buffer: Explicit breakout buffer; when ``None`` it is computed as
+            ``or_width * breakout_buffer_pct`` (the engine path).
+        breakout_buffer_pct: Fractional buffer used when *buffer* is unset.
+
+    Returns:
+        A :class:`Signal` on breakout, else ``None``.
+    """
+    buffer_val = buffer if buffer is not None else or_width * breakout_buffer_pct
+
+    # Long breakout
+    if direction_mode in ("both", "long_only") and close_price > (
+        or_high + buffer_val
+    ):
+        stop_loss = or_low
+        risk_amount = close_price - stop_loss
+        if risk_amount <= 0:
+            return None  # Invalid geometry
+        take_profit = close_price + (target_r * risk_amount)
+        return Signal(
+            session_id=session_id,
+            timestamp=timestamp,
+            symbol=symbol,
+            direction="LONG",
+            entry_price=close_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            risk_amount=risk_amount,
+            or_high=or_high,
+            or_low=or_low,
+            or_width=or_width,
+        )
+
+    # Short breakout
+    elif direction_mode in (
+        "both",
+        "short_only",
+    ) and close_price < (or_low - buffer_val):
+        stop_loss = or_high
+        risk_amount = stop_loss - close_price
+        if risk_amount <= 0:
+            return None  # Invalid geometry
+        take_profit = close_price - (target_r * risk_amount)
+        return Signal(
+            session_id=session_id,
+            timestamp=timestamp,
+            symbol=symbol,
+            direction="SHORT",
+            entry_price=close_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            risk_amount=risk_amount,
+            or_high=or_high,
+            or_low=or_low,
+            or_width=or_width,
+        )
+
+    return None
+
+
 class SignalGenerator:
     """Evaluates trading bars sequentially against frozen OpeningRange."""
 
@@ -108,69 +199,28 @@ class SignalGenerator:
         or_low = opening_range.or_low
         or_width = opening_range.or_width
 
-        # Determine buffer
-        buffer_val = (
-            self._buffer
-            if self._buffer is not None
-            else (or_width * self._config.breakout_buffer_pct)
-        )
+        # Buffer resolution lives in evaluate_bar_signal; an explicitly
+        # constructed buffer still overrides the config-derived one.
         target_r = self._config.target_r
 
         for _, row in trading_bars.iterrows():
-            close_price = float(row["close"])
-            ts = pd.Timestamp(row["timestamp"])
-
-            # Long breakout check
-            if self._config.direction_mode in ("both", "long_only") and close_price > (
-                or_high + buffer_val
-            ):
-                stop_loss = or_low
-                risk_amount = close_price - stop_loss
-                if risk_amount <= 0:
-                    continue  # Invalid geometry
-                take_profit = close_price + (target_r * risk_amount)
-
-                signal = Signal(
-                    session_id=opening_range.session_id,
-                    timestamp=ts,
-                    symbol=symbol,
-                    direction="LONG",
-                    entry_price=close_price,
-                    stop_loss=stop_loss,
-                    take_profit=take_profit,
-                    risk_amount=risk_amount,
-                    or_high=or_high,
-                    or_low=or_low,
-                    or_width=or_width,
+            signal = evaluate_bar_signal(
+                close_price=float(row["close"]),
+                timestamp=pd.Timestamp(row["timestamp"]),
+                session_id=opening_range.session_id,
+                symbol=symbol,
+                or_high=or_high,
+                or_low=or_low,
+                or_width=or_width,
+                direction_mode=self._config.direction_mode,
+                target_r=target_r,
+                buffer=self._buffer,
+                breakout_buffer_pct=self._config.breakout_buffer_pct,
+            )
+            if signal is not None:
+                logger.info(
+                    "%s breakout signal generated: %s", signal.direction, signal
                 )
-                logger.info("Long breakout signal generated: %s", signal)
-                return signal
-
-            # Short breakout check
-            elif self._config.direction_mode in (
-                "both",
-                "short_only",
-            ) and close_price < (or_low - buffer_val):
-                stop_loss = or_high
-                risk_amount = stop_loss - close_price
-                if risk_amount <= 0:
-                    continue  # Invalid geometry
-                take_profit = close_price - (target_r * risk_amount)
-
-                signal = Signal(
-                    session_id=opening_range.session_id,
-                    timestamp=ts,
-                    symbol=symbol,
-                    direction="SHORT",
-                    entry_price=close_price,
-                    stop_loss=stop_loss,
-                    take_profit=take_profit,
-                    risk_amount=risk_amount,
-                    or_high=or_high,
-                    or_low=or_low,
-                    or_width=or_width,
-                )
-                logger.info("Short breakout signal generated: %s", signal)
                 return signal
 
         return None

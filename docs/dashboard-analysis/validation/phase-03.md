@@ -81,9 +81,11 @@ progress <2s (deadline-polled) · CPU-cancel ack **0.49s** (budget 2s).
 
 ## Limitations (explicit)
 
-- Blocked-network cancel ack is bounded by the provider's request timeout
-  plus the next boundary check; proven responsive (T14) but not timed to 2s
-  against a real provider — P5 fake-stream tests own that clock.
+- Cancellation during a blocked provider call waits for that call to return
+  or time out, followed by the next cancellation check. No measured upper
+  bound for blocked-network acknowledgement has been established. The CPU
+  cancellation evidence and passing test counts do not establish that bound;
+  provider timeout/retry behavior requires separate controlled validation.
 - No background supervisor thread: dispatch happens on submit/cancel/UI
   poll/worker handoff. A crashed worker with an empty queue waits for the
   next supervisor call (documented; matches local single-user scope).

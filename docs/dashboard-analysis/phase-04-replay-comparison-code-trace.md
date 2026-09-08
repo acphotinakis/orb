@@ -2,7 +2,7 @@
 
 [Master plan](implementation-plan.md) · Previous: [Run control](phase-03-run-control.md) · Next: [Streaming monitor](phase-05-streaming-market-monitor.md)
 
-Status: proposed. Entry gate: Phases 1–3 accepted, including timestamp and source snapshot contracts.
+Status: in progress — shared-rule parity and execution-trace/reducer foundation implemented; UI and acceptance evidence pending. Phases 1–3 accepted. See [foundation validation](validation/phase-04.md).
 
 ## Objectives
 

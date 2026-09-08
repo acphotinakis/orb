@@ -28,9 +28,16 @@ import numpy as np
 
 from src.common.config import AppConfig
 from src.backtest.models import Position, Trade, PositionSide, ExitReason
+from src.backtest.trace import (
+    RULE_BREAKOUT_CLOSE,
+    RULE_EXIT_BRACKET,
+    RULE_FLATTEN,
+    TraceCollector,
+)
+from src.common.time_utils import get_timeframe_minutes
 from src.backtest.execution_model import ExecutionModel
 from src.strategy.opening_range import OpeningRangeCalculator, OpeningRange
-from src.strategy.signals import SignalGenerator, Signal
+from src.strategy.signals import SignalGenerator, Signal, evaluate_bar_signal
 from src.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -67,6 +74,7 @@ class BacktestEngine:
         *,
         progress: Optional[callable] = None,
         cancel_requested: Optional[callable] = None,
+        trace: Optional["TraceCollector"] = None,
     ) -> BacktestResult:
         """Executes full backtest across all sessions in df_processed.
 
@@ -80,6 +88,9 @@ class BacktestEngine:
                 the partial result is returned with ``cancelled=True`` on the
                 result container (trades/equity so far are retained, capital
                 reflects only closed trades).
+            trace: Optional :class:`TraceCollector` receiving versioned
+                decision events captured from this execution (P4-O1).
+                ``None`` records nothing beyond coarse progress.
         """
         if df_processed.empty:
             logger.warning("Empty DataFrame passed to BacktestEngine.run().")
@@ -113,6 +124,10 @@ class BacktestEngine:
 
         total_sessions = session_groups.ngroups
         completed_sessions = 0
+        try:
+            bar_minutes = get_timeframe_minutes(self.config.data.timeframe)
+        except Exception:
+            bar_minutes = 1
         for session_id, session_bars in session_groups:
             session_id_str = str(session_id)
             if _cancelled():
@@ -125,6 +140,35 @@ class BacktestEngine:
 
             # 1. Opening Range phase: Compute & Freeze OR
             or_obj = self.or_calculator.calculate_session_or(session_bars)
+            freeze_at = pd.Timestamp(
+                f"{session_id_str} 09:30:00", tz="America/New_York"
+            ) + pd.Timedelta(minutes=self.config.strategy.opening_range_minutes)
+            freeze_recorded = False
+
+            def record_bar(bar):
+                nonlocal freeze_recorded
+                if trace is None:
+                    return
+                bar_start = pd.Timestamp(bar["timestamp"])
+                available = bar_start + pd.Timedelta(minutes=bar_minutes)
+                trace.record(
+                    "bar_observed", session_id=session_id_str,
+                    bar_start=str(bar_start), available_at=str(available),
+                    **{key: float(bar[key]) for key in
+                       ("open", "high", "low", "close", "volume")},
+                    minute_of_day=int(bar["minute_of_day"]),
+                    is_opening_range=bool(bar.get("is_opening_range", False)),
+                )
+                if not freeze_recorded and available >= freeze_at:
+                    trace.record(
+                        "or_frozen", session_id=session_id_str,
+                        bar_start=str(bar_start), available_at=str(available),
+                        valid=bool(or_obj.is_valid),
+                        or_high=float(or_obj.or_high) if or_obj.is_valid else None,
+                        or_low=float(or_obj.or_low) if or_obj.is_valid else None,
+                        or_width=float(or_obj.or_width) if or_obj.is_valid else None,
+                    )
+                    freeze_recorded = True
             if not or_obj.is_valid:
                 logger.warning(
                     "Session %s has invalid OR; skipping session trading.",
@@ -132,6 +176,7 @@ class BacktestEngine:
                 )
                 # Still record equity curve as flat
                 for _, bar in session_bars.iterrows():
+                    record_bar(bar)
                     equity_records.append(
                         {
                             "timestamp": bar["timestamp"],
@@ -166,6 +211,7 @@ class BacktestEngine:
                         bar_num, session_id_str,
                     )
                     break
+                record_bar(bar)
                 ts = pd.Timestamp(bar["timestamp"])
                 high_p = float(bar["high"])
                 low_p = float(bar["low"])
@@ -184,12 +230,50 @@ class BacktestEngine:
                         all_trades.append(closed_trade)
                         current_capital += closed_trade.pnl_dollars
                         active_position = None
+                        if trace is not None:
+                            reason = str(closed_trade.exit_reason)
+                            trace.record(
+                                "trade_closed",
+                                session_id=session_id_str,
+                                trade_id=closed_trade.trade_id,
+                                rule_id=RULE_FLATTEN
+                                if reason == "EOD" and bool(bar.get("is_force_exit", False))
+                                else RULE_EXIT_BRACKET,
+                                exit_reason=reason,
+                                exit_price=float(closed_trade.exit_price),
+                                pnl_dollars=float(closed_trade.pnl_dollars),
+                                bar_start=str(ts),
+                                available_at=str(
+                                    ts + pd.Timedelta(minutes=bar_minutes)
+                                ),
+                            )
 
                 # If flat and inside trading window (and haven't exceeded daily trade limit)
                 elif not is_or and not is_fe and session_trades_count < max_trades:
                     # Check for breakout signal on bar close
                     # We evaluate bar breakout against frozen OR
                     signal = self._check_signal_at_bar(bar, or_obj)
+                    if trace is not None:
+                        trace.record(
+                            "signal_check",
+                            session_id=session_id_str,
+                            rule_id=RULE_BREAKOUT_CLOSE,
+                            bar_start=str(ts),
+                            available_at=str(
+                                ts + pd.Timedelta(minutes=bar_minutes)
+                            ),
+                            breakout_buffer=float(or_obj.or_width * self.config.strategy.breakout_buffer_pct),
+                            direction_mode=self.config.strategy.direction_mode,
+                            target_r=float(self.config.strategy.target_r),
+                            close=close_p,
+                            or_high=float(or_obj.or_high),
+                            or_low=float(or_obj.or_low),
+                            outcome="accepted" if signal is not None else "rejected",
+                            reason="breakout"
+                            if signal is not None
+                            else "no_breakout",
+                            direction=signal.direction if signal is not None else None,
+                        )
                     if signal is not None:
                         # Attempt entry execution
                         pos = self._enter_position(
@@ -202,6 +286,36 @@ class BacktestEngine:
                             active_position = pos
                             session_trades_count += 1
                             trade_id_counter += 1
+                            if trace is not None:
+                                trace.record(
+                                    "trade_opened",
+                                    session_id=session_id_str,
+                                    trade_id=pos.trade_id,
+                                    rule_id=RULE_BREAKOUT_CLOSE,
+                                    direction=pos.side.value,
+                                    entry_price=float(pos.entry_price),
+                                    shares=int(pos.shares),
+                                    stop_loss=float(pos.stop_loss),
+                                    take_profit=float(pos.take_profit),
+                                    bar_start=str(ts),
+                                    available_at=str(
+                                        ts + pd.Timedelta(minutes=bar_minutes)
+                                    ),
+                                )
+                elif trace is not None and not is_or and not is_fe:
+                    trace.record(
+                        "signal_check",
+                        session_id=session_id_str,
+                        rule_id=RULE_BREAKOUT_CLOSE,
+                        bar_start=str(ts),
+                        available_at=str(ts + pd.Timedelta(minutes=bar_minutes)),
+                        close=close_p,
+                        or_high=float(or_obj.or_high),
+                        or_low=float(or_obj.or_low),
+                        outcome="rejected",
+                        reason="trade_limit",
+                        direction=None,
+                    )
 
                 # Record minute-by-minute equity mark-to-market
                 unrealized_pnl = 0.0
@@ -237,6 +351,19 @@ class BacktestEngine:
                 all_trades.append(closed_trade)
                 current_capital += closed_trade.pnl_dollars
                 active_position = None
+                if trace is not None:
+                    last_ts = pd.Timestamp(last_bar["timestamp"])
+                    trace.record(
+                        "trade_closed",
+                        session_id=session_id_str,
+                        trade_id=closed_trade.trade_id,
+                        rule_id=RULE_FLATTEN,
+                        exit_reason="EOD",
+                        exit_price=float(closed_trade.exit_price),
+                        pnl_dollars=float(closed_trade.pnl_dollars),
+                        bar_start=str(last_ts),
+                        available_at=str(last_ts + pd.Timedelta(minutes=bar_minutes)),
+                    )
                 # P1-A4: the fallback close executes after the last per-bar
                 # mark, so record the flattened state explicitly. Without this,
                 # ending equity disagrees with final capital (U1).
@@ -314,63 +441,24 @@ class BacktestEngine:
         bar: pd.Series,
         opening_range: OpeningRange,
     ) -> Optional[Signal]:
-        """Evaluates single bar close against OR boundaries."""
-        close_p = float(bar["close"])
-        ts = pd.Timestamp(bar["timestamp"])
-        symbol = self.config.strategy.ticker
+        """Evaluates single bar close against OR boundaries.
 
-        or_high = opening_range.or_high
-        or_low = opening_range.or_low
-        or_width = opening_range.or_width
-        buffer_val = or_width * self.config.strategy.breakout_buffer_pct
-        target_r = self.config.strategy.target_r
-        direction_mode = self.config.strategy.direction_mode
-
-        # Long breakout
-        if direction_mode in ("both", "long_only") and close_p > (or_high + buffer_val):
-            stop_loss = or_low
-            risk_amt = close_p - stop_loss
-            if risk_amt <= 0:
-                return None
-            tp = close_p + (target_r * risk_amt)
-            return Signal(
-                session_id=opening_range.session_id,
-                timestamp=ts,
-                symbol=symbol,
-                direction="LONG",
-                entry_price=close_p,
-                stop_loss=stop_loss,
-                take_profit=tp,
-                risk_amount=risk_amt,
-                or_high=or_high,
-                or_low=or_low,
-                or_width=or_width,
-            )
-
-        # Short breakout
-        elif direction_mode in ("both", "short_only") and close_p < (
-            or_low - buffer_val
-        ):
-            stop_loss = or_high
-            risk_amt = stop_loss - close_p
-            if risk_amt <= 0:
-                return None
-            tp = close_p - (target_r * risk_amt)
-            return Signal(
-                session_id=opening_range.session_id,
-                timestamp=ts,
-                symbol=symbol,
-                direction="SHORT",
-                entry_price=close_p,
-                stop_loss=stop_loss,
-                take_profit=tp,
-                risk_amount=risk_amt,
-                or_high=or_high,
-                or_low=or_low,
-                or_width=or_width,
-            )
-
-        return None
+        Delegates to the shared :func:`evaluate_bar_signal` domain function
+        (P4-O1); the engine path uses a config-derived buffer (``buffer=None``).
+        """
+        return evaluate_bar_signal(
+            close_price=float(bar["close"]),
+            timestamp=pd.Timestamp(bar["timestamp"]),
+            session_id=opening_range.session_id,
+            symbol=self.config.strategy.ticker,
+            or_high=opening_range.or_high,
+            or_low=opening_range.or_low,
+            or_width=opening_range.or_width,
+            direction_mode=self.config.strategy.direction_mode,
+            target_r=self.config.strategy.target_r,
+            buffer=None,
+            breakout_buffer_pct=self.config.strategy.breakout_buffer_pct,
+        )
 
     def _enter_position(
         self,
