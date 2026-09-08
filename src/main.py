@@ -41,8 +41,9 @@ def parse_args(args=None) -> argparse.Namespace:
     parser.add_argument(
         "--run-id",
         type=str,
-        default="baseline_v1",
-        help="Run identifier tag used in the experiment directory name.",
+        default=None,
+        help="Explicit run identifier (filesystem-safe). Omit to mint a UUID "
+        "so reruns can never overwrite each other (P1-O3).",
     )
     parser.add_argument(
         "--symbol",
@@ -197,6 +198,7 @@ def main(argv=None) -> int:
             generate_plots=request.generate_plots,
             run_id=args.run_id,
             log_level=request.log_level,
+            run_label=request.run_label,
         )
         return 0
 

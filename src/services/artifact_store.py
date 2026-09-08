@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -89,14 +90,27 @@ def fingerprint_dataframe(df: pd.DataFrame) -> str:
         digest.update(part.encode("utf-8"))
     for col in cols:
         series = canonical[col]
-        try:
-            if pd.api.types.is_datetime64_any_dtype(series):
-                vals = series.dt.tz_convert("UTC").astype("int64").to_numpy()
-            else:
-                vals = series.to_numpy()
+        if pd.api.types.is_datetime64_any_dtype(series):
+            vals = series.dt.tz_convert("UTC").astype("int64").to_numpy()
             digest.update(vals.tobytes())
-        except Exception:
-            digest.update(str(series.tolist()).encode("utf-8"))
+            continue
+        vals = series.to_numpy()
+        if vals.dtype == object:
+            # Object arrays hash pointers with tobytes(); encode content
+            # deterministically instead (length-prefixed UTF-8, null sentinel).
+            for value in vals:
+                if value is None or value is pd.NA or (
+                    isinstance(value, float) and math.isnan(value)
+                ):
+                    digest.update(b"\x00null\x00")
+                else:
+                    encoded = str(value).encode("utf-8")
+                    digest.update(len(encoded).to_bytes(8, "big") + encoded)
+        else:
+            try:
+                digest.update(vals.tobytes())
+            except Exception:
+                digest.update(str(series.tolist()).encode("utf-8"))
     return digest.hexdigest()
 
 

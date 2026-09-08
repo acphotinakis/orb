@@ -80,9 +80,10 @@ class ORBPipeline:
         end_date: Optional[str] = None,
         refresh_cache: bool = False,
         generate_plots: bool = True,
-        run_id: str = "baseline_v1",
+        run_id: Optional[str] = None,
         log_level: str = "INFO",
         base_dir: Optional[Union[str, Path]] = None,
+        run_label: Optional[str] = None,
     ) -> PipelineRunResult:
         """Execute the full pipeline workflow from data ingestion to reporting.
 
@@ -92,18 +93,47 @@ class ORBPipeline:
             end_date: Backtest end date (``"YYYY-MM-DD"``).  ``None``
                 uses the most recent available data.
             refresh_cache: When ``True``, bypass the raw Parquet cache and
-                re-fetch from Alpaca.
+                re-fetch from Alpaca; the refresh propagates to processed
+                data (P1-O3).
             generate_plots: When ``True``, produce all chart outputs.
-            run_id: Experiment identifier used in directory naming.
+            run_id: Experiment identifier.  ``None`` (default) mints a
+                server-side UUID so reruns can never overwrite each other;
+                explicit values must be filesystem-safe single components.
             log_level: Logging verbosity for this run.
             base_dir: Base directory override for filesystem root.
+            run_label: User-facing tag recorded in the manifest; never a
+                filesystem identity.
+
+        Completion contract (P1-O3): artifacts are published atomically and
+        the validated ``manifest.json`` is written last.  Only a present,
+        valid, ``succeeded`` manifest marks a run complete
+        (:func:`src.services.artifact_store.is_run_complete`).
 
         Returns:
             :class:`PipelineRunResult` with metrics, artifact paths, and
             timing information.
         """
+        from uuid import uuid4
+
+        from src.services.artifact_store import (
+            build_manifest,
+            dataset_identity,
+            ensure_safe_component,
+            fingerprint_dataframe,
+            identity_short_hash,
+            publish_manifest_last,
+            sha256_file,
+            source_code_fingerprint,
+        )
+
         t0 = time.time()
         artifacts: Dict[str, Path] = {}
+        created_at = datetime.now(timezone.utc).isoformat()
+
+        if run_id is None:
+            run_id = uuid4().hex
+        else:
+            ensure_safe_component(run_id, field_name="run_id")
 
         # ── Parse date bounds ─────────────────────────────────────────
         s_dt: Optional[datetime] = None
@@ -220,14 +250,35 @@ class ORBPipeline:
                 artifacts[f"cleaned_candlestick_chart_{idx}"] = p
 
         # ── Step 3: RTH Session Processing ────────────────────────────
+        # Identity (P1-O3): the processed dataset is keyed by every input
+        # affecting its content.  Same identity → shared immutable directory;
+        # changed inputs → a different directory, never a silent overwrite.
         logger.info(
             "[3/6] Normalizing timezone to ET, filtering RTH (09:30-16:00), "
             "and tagging session metadata..."
         )
+        source_fingerprint = fingerprint_dataframe(cleaned_df)
+        cleaned_min = pd.Timestamp(cleaned_df["timestamp"].min())
+        cleaned_max = pd.Timestamp(cleaned_df["timestamp"].max())
+        identity = dataset_identity(
+            source_fingerprint,
+            feed=self.config.data.feed,
+            symbol=self.config.data.symbol,
+            timeframe=self.config.data.timeframe,
+            date_min=str(cleaned_min.date()),
+            date_max=str(cleaned_max.date()),
+            or_minutes=self.config.strategy.opening_range_minutes,
+            force_exit_time=self.config.strategy.force_exit_time,
+        )
+        identity_hash = identity_short_hash(identity)
+        processed_file = paths.processed_file_for_identity(identity_hash)
+        logger.info("Dataset identity %s → %s", identity_hash, processed_file)
         processed_df = processor.process(
             cleaned_df,
             save_to_disk=True,
-            output_path=paths.processed_file,
+            output_path=processed_file,
+            force_refresh=refresh_cache,
+            identity=identity,
         )
         if processed_df.empty:
             raise RuntimeError(
@@ -291,6 +342,88 @@ class ORBPipeline:
             )
             for idx, tp in enumerate(trade_plots, 1):
                 artifacts[f"trade_chart_{idx}"] = tp
+
+        # ── Manifest-last publication (P1-O3) ─────────────────────────
+        # Every artifact is checksummed; the validated manifest is written
+        # last and is the sole completion marker.  Failure anywhere above
+        # leaves no manifest, so incomplete runs can never look complete.
+        logger.info("Verifying artifacts and publishing manifest...")
+        experiment_dir = paths.experiment_dir
+        artifact_entries: Dict[str, Dict[str, Any]] = {}
+        for sub in ("results", "plots"):
+            subdir = experiment_dir / sub
+            if subdir.is_dir():
+                for file_path in sorted(subdir.rglob("*")):
+                    if file_path.is_file():
+                        rel = file_path.relative_to(experiment_dir).as_posix()
+                        artifact_entries[rel] = {
+                            "relative_path": rel,
+                            "sha256": sha256_file(file_path),
+                            "bytes": file_path.stat().st_size,
+                        }
+        for single in (paths.config_snapshot_yaml,):
+            if single.is_file():
+                rel = single.relative_to(experiment_dir).as_posix()
+                artifact_entries[rel] = {
+                    "relative_path": rel,
+                    "sha256": sha256_file(single),
+                    "bytes": single.stat().st_size,
+                }
+
+        processed_fingerprint = fingerprint_dataframe(processed_df)
+        net_pnl = float(backtest_result.trades_df["pnl_dollars"].sum()) if (
+            not backtest_result.trades_df.empty
+            and "pnl_dollars" in backtest_result.trades_df.columns
+        ) else 0.0
+        manifest = build_manifest(
+            run_id=run_id,
+            run_label=run_label,
+            config_dict=self.config.to_dict(),
+            request_dict={
+                "start_date": start_date,
+                "end_date": end_date,
+                "refresh_cache": refresh_cache,
+                "generate_plots": generate_plots,
+                "log_level": log_level,
+            },
+            source_dict=source_code_fingerprint(),
+            datasets_dict={
+                "raw": {
+                    "fingerprint": source_fingerprint,
+                    "feed": self.config.data.feed,
+                    "symbol": self.config.data.symbol,
+                    "timeframe": self.config.data.timeframe,
+                    "rows": len(cleaned_df),
+                    "date_min": str(cleaned_min.date()),
+                    "date_max": str(cleaned_max.date()),
+                },
+                "processed": {
+                    "identity": identity,
+                    "identity_hash": identity_hash,
+                    "path": processed_file.relative_to(paths.root_dir).as_posix()
+                    if processed_file.is_relative_to(paths.root_dir)
+                    else str(processed_file),
+                    "fingerprint": processed_fingerprint,
+                    "rows": len(processed_df),
+                    "sessions": int(processed_df["session_id"].nunique()),
+                },
+            },
+            artifacts_dict=artifact_entries,
+            accounting_dict={
+                "initial_capital": self.config.execution.initial_capital,
+                "final_capital": float(backtest_result.final_capital),
+                "sum_net_trade_pnl": net_pnl,
+                "reconcile_gap": float(
+                    metrics["portfolio_metrics"]["ending_equity"]
+                    - self.config.execution.initial_capital
+                    - metrics["trade_metrics"]["total_pnl_dollars"]
+                ),
+            },
+            created_at=created_at,
+        )
+        manifest_path = publish_manifest_last(experiment_dir, manifest)
+        artifacts["manifest_json"] = manifest_path
+        logger.info("Manifest published: %s", manifest_path)
 
         # ── Console summary ───────────────────────────────────────────
         reporter.display_console_summary(metrics)

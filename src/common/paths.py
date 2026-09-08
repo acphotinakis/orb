@@ -13,10 +13,11 @@ Design
   ``data/raw/{symbol}/{feed}/{timeframe}/``.
   Two runs on ``SPY_15Min`` reuse the same Parquet files without
   re-downloading.
-* **Processed sessions** are shared per date-range —
-  ``data/processed/{symbol}/{timeframe}_{date_slug}/``.
-  Different strategy parameters on the same data window do not re-process
-  RTH sessions.
+* **Processed sessions** are immutable per dataset identity —
+  ``data/processed/{symbol}/{timeframe}_{date_slug}_{identity}/``.
+  Every content-affecting input (source fingerprint, feed, OR minutes,
+  force-exit, ...) is part of the identity, so incompatible data can never
+  share a directory and completed runs keep referencing byte-stable inputs.
 * **Experiment artifacts** are fully isolated —
   ``experiments/{experiment_id}/``.
   Each run is self-contained and archivable as a single directory.
@@ -128,12 +129,15 @@ class PathManager:
 
     @property
     def processed_data_dir(self) -> Path:
-        """Processed RTH sessions directory, scoped to date range.
+        """Legacy processed directory, scoped to date range only.
 
         Path: ``{root}/data/processed/{symbol}/{timeframe}_{date_slug}/``
 
-        Reused by any run covering the same symbol, timeframe, and date range
-        regardless of strategy parameters.
+        .. deprecated::
+            Lacks content identity (P1-O3): prefer
+            :meth:`processed_dir_for_identity`, which keys the directory by
+            every content-affecting input.  Retained for backward
+            compatibility only.
         """
         p = (
             self.root_dir
@@ -144,6 +148,33 @@ class PathManager:
         )
         p.mkdir(parents=True, exist_ok=True)
         return p
+
+    def processed_dir_for_identity(self, identity_hash: str) -> Path:
+        """Immutable processed dataset directory for one dataset identity.
+
+        Path: ``{root}/data/processed/{symbol}/{timeframe}_{date_slug}_{hash}/``
+
+        Args:
+            identity_hash: Short hash from
+                :func:`src.services.artifact_store.identity_short_hash`
+                (validated as a safe path component).
+        """
+        from src.services.artifact_store import ensure_safe_component
+
+        ensure_safe_component(identity_hash, field_name="identity_hash")
+        p = (
+            self.root_dir
+            / "data"
+            / "processed"
+            / self.symbol
+            / f"{self.timeframe}_{self.date_slug}_{identity_hash}"
+        )
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    def processed_file_for_identity(self, identity_hash: str) -> Path:
+        """Canonical ``sessions.parquet`` inside :meth:`processed_dir_for_identity`."""
+        return self.processed_dir_for_identity(identity_hash) / "sessions.parquet"
 
     # ------------------------------------------------------------------
     # Experiment root and run-specific subdirectories

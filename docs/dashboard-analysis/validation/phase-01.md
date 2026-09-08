@@ -112,3 +112,65 @@ point (`build_run_request`) for CLI / dashboard / worker.
 
 P1-O3/O4 remaining: cache identity + immutable manifests, then time/calendar
 contract. No credentials used; no network access.
+
+---
+
+# P1-3/P1-4 record — cache identity + immutable manifests (appended 2026-09-08)
+
+Scope: P1-O3 only (P1-O4 time/calendar still open). Implemented together per
+plan: identity determines the dataset a manifest references.
+
+## What was built
+
+- `src/services/artifact_store.py` (new): `fingerprint_dataframe` (canonical
+  content sha256), `dataset_identity` + `identity_short_hash` (all
+  content-affecting inputs: source fingerprint, feed, symbol, timeframe, date
+  bounds, processing version, OR minutes, force-exit), `source_code_fingerprint`
+  (git rev + dirty, best-effort, never raises), atomic parquet/text/bytes
+  writers (temp sibling + `os.replace`), per-key `threading.Lock` registry,
+  `ensure_safe_component` / `ensure_within_root` (symlink-resolving),
+  `build_manifest` / `validate_manifest` / `publish_manifest_last` /
+  `is_run_complete` (manifest.json with status `succeeded` is the sole
+  completion marker; checksums verified on every validation).
+- `DataProcessor`: identity-gated cache (sidecar `<file>.identity.json` must
+  match exactly or it rebuilds; no identity → always rebuilds, fail-safe),
+  atomic save (parquet first, sidecar second — a crash between them forces a
+  rebuild, never a false hit), whole check-build-write under the per-key lock,
+  `force_refresh` honored. `PROCESSING_VERSION = "1"` bumps invalidate.
+- `PathManager.processed_dir_for_identity`: immutable directories
+  `{symbol}/{timeframe}_{dateslug}_{hash}/` (D2). Legacy date-only property
+  kept, marked deprecated. Different inputs → different directories (no
+  incompatible hit possible); same inputs → shared byte-stable directory, so
+  old runs keep referencing unchanged data after later refreshes.
+- `ORBPipeline.run`: UUID run IDs when `run_id` is `None` (explicit IDs
+  validated filesystem-safe, rejected before side effects); refresh
+  propagates raw→processed; identity computed from validated bars;
+  manifest published LAST after checksum enumeration of `results/`, `plots/`,
+  and the config snapshot, including `accounting.reconcile_gap` evidence.
+  New `run_label` param (label-only). CLI `--run-id` defaults to `None`.
+
+## Real bug found by T13 (not a test artifact)
+
+`fingerprint_dataframe` hashed object-dtype columns via `tobytes()`, which
+hashes string-object *pointers*: fresh vs parquet-roundtripped frames with
+identical content produced different digests, so identical reruns never shared
+a dataset. Fixed with deterministic length-prefixed UTF-8 content encoding.
+T13 (identical-rerun identity equality) now guards it.
+
+## Evidence
+
+- `tests/services/test_cache_identity.py` (7): OR/exit/feed changes rebuild
+  or rekey (T05), revised-raw invalidation, refresh propagation, corrupt
+  parquet/sidecar recovery, missing build, 8-thread same-key validity (T06/T07).
+- `tests/services/test_run_manifests.py` (8): no-manifest/corrupt-manifest
+  incompleteness, tamper detection, publish-refuses-bad-payload (T07),
+  run-ID traversal + symlink escape rejection (T08), single-cell fingerprint
+  sensitivity (T13), provenance shape, atomic-write hygiene.
+- `tests/integration/test_identity_manifests.py` (6): same-label UUID
+  distinctness + completion, pipeline-level traversal rejection, rerun metric
+  equality with shared identity dir, old-run byte/metrics stability after an
+  OR-30 run, manifest content contract incl. `reconcile_gap ≤ 0.01`.
+- Full suite: **74 passed, 0 failed** (53 prior + 21 new), default mode.
+
+P1-O4 remaining: time/calendar contract (P1-T11/P1-A5). No credentials used;
+no network access.
