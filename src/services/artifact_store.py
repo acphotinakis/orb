@@ -37,9 +37,10 @@ import re
 import subprocess
 import tempfile
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Union
 
 import pandas as pd
 
@@ -376,3 +377,312 @@ def is_run_complete(experiment_dir: Path) -> bool:
     except Exception:
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# Read-only discovery + artifact readers (P2: browsing never computes)
+# ---------------------------------------------------------------------------
+
+#: Run states visible to the results explorer.
+RUN_STATUS_COMPLETE = "complete"
+RUN_STATUS_CORRUPT = "corrupt"  # manifest present but invalid
+RUN_STATUS_LEGACY = "legacy"  # no manifest: predates provenance, unsupported
+
+
+@dataclass(frozen=True)
+class DiscoveredRun:
+    """One experiment directory as seen by the read-only explorer."""
+
+    run_id: str
+    status: str
+    experiment_dir: Path
+    run_label: Optional[str] = None
+    completed_at: Optional[str] = None
+    detail: str = ""
+
+
+def _manifest_status(manifest: Mapping[str, Any]) -> str:
+    return str(manifest.get("status", "unknown"))
+
+
+def discover_runs(storage_root: Union[Path, str]) -> list["DiscoveredRun"]:
+    """List experiment runs under ``<root>/experiments/`` without computing.
+
+    * ``complete`` — valid, checksum-verified, succeeded manifest.
+    * ``corrupt`` — manifest present but invalid (kept listed with the
+      reason; never blocks healthy runs).
+    * ``legacy`` — no manifest: unsupported for browsing (explicit validated
+      import may arrive later; provenance is never guessed).
+
+    Never raises for a single bad directory; the reason lands in ``detail``.
+    """
+    from pathlib import Path as _Path
+
+    root = _Path(storage_root)
+    exp_root = root / "experiments"
+    if not exp_root.is_dir():
+        return []
+    found: list[DiscoveredRun] = []
+    for child in sorted(exp_root.iterdir()):
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        # run_id is the leading component of "<run_id>__<symbol>_<tf>_<slug>".
+        short_id = child.name.split("__")[0]
+        manifest_path = child / "manifest.json"
+        if not manifest_path.is_file():
+            found.append(
+                DiscoveredRun(
+                    run_id=short_id,
+                    status=RUN_STATUS_LEGACY,
+                    experiment_dir=child,
+                    detail="No manifest.json: predates run provenance; unsupported for browsing.",
+                )
+            )
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            validate_manifest(manifest, child)
+            found.append(
+                DiscoveredRun(
+                    run_id=str(manifest.get("run_id", short_id)),
+                    status=RUN_STATUS_COMPLETE,
+                    experiment_dir=child,
+                    run_label=manifest.get("run_label"),
+                    completed_at=manifest.get("completed_at"),
+                )
+            )
+        except ConfigurationError as exc:
+            found.append(
+                DiscoveredRun(
+                    run_id=short_id,
+                    status=RUN_STATUS_CORRUPT,
+                    experiment_dir=child,
+                    detail=str(exc),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad dir never blocks discovery
+            found.append(
+                DiscoveredRun(
+                    run_id=short_id,
+                    status=RUN_STATUS_CORRUPT,
+                    experiment_dir=child,
+                    detail=f"Unreadable manifest: {exc}",
+                )
+            )
+    return found
+
+
+@dataclass(frozen=True)
+class RunArtifacts:
+    """Validated, in-memory contents of one completed run (read-only)."""
+
+    manifest: Mapping[str, Any]
+    metrics: Mapping[str, Any]
+    trades: pd.DataFrame
+    equity: pd.DataFrame
+    daily: pd.DataFrame
+    config_snapshot: Mapping[str, Any]
+
+
+def _read_csv_checked(experiment_dir: Path, rel: str) -> pd.DataFrame:
+    target = ensure_within_root(experiment_dir, experiment_dir / rel)
+    if not target.is_file():
+        raise ConfigurationError(
+            f"Artifact '{rel}' is missing.", field="artifacts"
+        )
+    try:
+        return pd.read_csv(target)
+    except Exception as exc:
+        raise ConfigurationError(
+            f"Artifact '{rel}' is unreadable: {exc}.", field="artifacts"
+        )
+
+
+def read_run_artifacts(
+    storage_root: Union[Path, str], run_id: str
+) -> RunArtifacts:
+    """Read and validate every artifact of one completed run (read-only).
+
+    Args:
+        storage_root: Storage root containing ``experiments/``.
+        run_id: Run identifier (validated as a safe path component).
+
+    Raises:
+        ConfigurationError: Unknown run, path escape, incomplete/corrupt run,
+            or unreadable artifact.  Never synthesizes fallback values and
+            never launches computation.
+    """
+    from pathlib import Path as _Path
+
+    ensure_safe_component(run_id, field_name="run_id")
+    root = _Path(storage_root)
+    # run_id is the leading component of the experiment directory name
+    # ("<run_id>__<symbol>_<tf>_<slug>"); match it exactly, never by substring.
+    exp_root = root / "experiments"
+    candidates = [
+        c
+        for c in exp_root.iterdir()
+        if c.is_dir() and (c.name == run_id or c.name.startswith(run_id + "__"))
+    ]
+    if not candidates:
+        raise ConfigurationError(f"Unknown run '{run_id}'.", field="run_id")
+    if len(candidates) > 1:
+        raise ConfigurationError(
+            f"Ambiguous run '{run_id}': {len(candidates)} matches.",
+            field="run_id",
+        )
+    experiment_dir = ensure_within_root(root, candidates[0])
+
+    manifest_path = experiment_dir / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ConfigurationError(
+            f"Run '{run_id}' has no readable manifest: {exc}.", field="manifest"
+        )
+    validate_manifest(manifest, experiment_dir)
+
+    metrics_rel = "results/metrics.json"
+    metrics_target = ensure_within_root(experiment_dir, experiment_dir / metrics_rel)
+    try:
+        metrics = json.loads(metrics_target.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ConfigurationError(
+            f"Artifact '{metrics_rel}' is unreadable: {exc}.", field="artifacts"
+        )
+
+    config_rel = "config_snapshot.yaml"
+    config_target = ensure_within_root(experiment_dir, experiment_dir / config_rel)
+    try:
+        import yaml as _yaml
+
+        config_snapshot = _yaml.safe_load(config_target.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ConfigurationError(
+            f"Artifact '{config_rel}' is unreadable: {exc}.", field="artifacts"
+        )
+
+    return RunArtifacts(
+        manifest=manifest,
+        metrics=metrics,
+        trades=_read_csv_checked(experiment_dir, "results/trades.csv"),
+        equity=_read_csv_checked(experiment_dir, "results/equity_curve.csv"),
+        daily=_read_csv_checked(experiment_dir, "results/daily_summary.csv"),
+        config_snapshot=config_snapshot,
+    )
+
+
+def read_session_bars(
+    storage_root: Union[Path, str], manifest: Mapping[str, Any], session_id: str
+) -> pd.DataFrame:
+    """Load one session's processed OHLCV bars via the manifest dataset ref.
+
+    Read-only: serves the immutable dataset the run recorded, requesting only
+    the selected session.  Raises :class:`ConfigurationError` when the
+    reference is missing, escapes storage, or lacks OHLC columns.
+    """
+    from pathlib import Path as _Path
+
+    try:
+        rel = manifest["datasets"]["processed"]["path"]
+    except KeyError:
+        raise ConfigurationError(
+            "Manifest has no processed dataset reference.", field="datasets"
+        )
+    root = _Path(storage_root)
+    target = ensure_within_root(root, root / rel)
+    if not target.is_file():
+        raise ConfigurationError(
+            f"Processed dataset '{rel}' is unavailable.", field="datasets"
+        )
+    try:
+        df = pd.read_parquet(target, engine="pyarrow")
+    except Exception as exc:
+        raise ConfigurationError(
+            f"Processed dataset '{rel}' is unreadable: {exc}.", field="datasets"
+        )
+    required = {"session_id", "timestamp", "open", "high", "low", "close"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ConfigurationError(
+            f"Processed dataset lacks columns: {sorted(missing)}.", field="datasets"
+        )
+    session = df.loc[df["session_id"] == session_id].reset_index(drop=True)
+    if session.empty:
+        raise ConfigurationError(
+            f"Session '{session_id}' not found in the recorded dataset.",
+            field="session_id",
+        )
+    return session
+DOWNLOAD_ALLOWLIST = (
+    "results/trades.csv",
+    "results/equity_curve.csv",
+    "results/daily_summary.csv",
+    "results/metrics.json",
+    "config_snapshot.yaml",
+)
+
+
+def read_download_bytes(
+    storage_root: Union[Path, str], run_id: str, relative_path: str
+) -> tuple[bytes, str]:
+    """Return ``(bytes, filename)`` for one allowlisted artifact, unchanged."""
+    from pathlib import Path as _Path
+
+    if relative_path not in DOWNLOAD_ALLOWLIST:
+        raise ConfigurationError(
+            f"Download '{relative_path}' is not in the allowlist.",
+            field="download",
+        )
+    ensure_safe_component(run_id, field_name="run_id")
+    root = _Path(storage_root)
+    matches = [
+        c
+        for c in (root / "experiments").iterdir()
+        if c.is_dir() and (c.name == run_id or c.name.startswith(run_id + "__"))
+    ]
+    if len(matches) != 1:
+        raise ConfigurationError(f"Unknown run '{run_id}'.", field="run_id")
+    target = ensure_within_root(root, matches[0] / relative_path)
+    return target.read_bytes(), _Path(relative_path).name
+
+
+# ---------------------------------------------------------------------------
+# Presentation helpers (units, timezones, unavailable-vs-zero)
+# ---------------------------------------------------------------------------
+
+EASTERN_TZ_NAME = "America/New_York"
+
+
+def to_et_display(value: Any) -> str:
+    """Format a timestamp in ET with an unambiguous numeric offset label."""
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    et = ts.tz_convert(EASTERN_TZ_NAME)
+    return et.strftime("%Y-%m-%d %H:%M:%S") + " ET" + et.strftime("%z")
+
+
+def display_value(value: Any, *, suffix: str = "") -> str:
+    """Render a metric distinctly: ``"inf"`` → ∞, missing/NaN → n/a, else value.
+
+    Unavailable metrics are never rendered as zero or a misleading percentage.
+    """
+    if value is None:
+        return "n/a"
+    if isinstance(value, str):
+        if value.strip().lower() == "inf":
+            return "∞" + suffix
+        return value
+    try:
+        if isinstance(value, float) and math.isnan(value):
+            return "n/a"
+    except TypeError:
+        return str(value)
+    return f"{value}{suffix}"
+
+
+def is_synthetic_run(manifest: Mapping[str, Any]) -> bool:
+    """True when the run label marks synthetic demonstration data."""
+    label = str((manifest.get("run_label") or ""))
+    return "synthetic" in label.lower()

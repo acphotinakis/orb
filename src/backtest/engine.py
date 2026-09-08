@@ -7,6 +7,16 @@ Replays 1-minute historical bars session-by-session, manages position state
 transitions, enforces conservative dual-touch stop/target resolution (stopping
 out first if both levels are touched in a single bar), handles 15:59:00 ET
 force-flattening, and produces trade ledgers and minute-by-minute equity curves.
+
+Timestamp semantics (P1-O4)
+---------------------------
+Bar ``timestamp`` values are bar-OPEN times.  Entry/exit decisions evaluate a
+bar's CLOSE, so a decision recorded against a bar was available one bar
+duration later (availability = bar start + timeframe duration), never at bar
+open.  Recorded ``entry_time``/``exit_time`` identify the deciding bar; the
+availability instant is derived, not stored.  See
+``docs/dashboard-analysis/validation/phase-01.md`` (P1-O4) for the supported
+calendar/timeframe policy.
 """
 
 from __future__ import annotations

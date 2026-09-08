@@ -1,22 +1,19 @@
 """
 tests/unit/test_accounting_reconciliation.py
 ============================================
-Focused accounting regression for U1 (P1-O1 / P1-5).
+Focused accounting regressions for U1 / P1-T09.
 
-Hand-calculated fixture: one session, fixed 100-share sizing, $0.01 slippage,
-$0.0035 commission, LONG breakout held into the end-of-session fallback close.
+Hand-calculated fixtures (fixed 100-share sizing, $0.01 slippage, $0.0035
+commission).  No expected value is derived from the implementation; all
+figures below are worked out from the execution-model rules:
 
-Independent expectations (no values derived from the implementation):
-  OR: high 501.0 / low 499.0 (width 2.0)
-  Entry bar close 501.5 -> LONG, stop 499.0, risk 2.5, tp 501.5 + 2*2.5 = 506.5
-  Entry fill 501.51, EOD exit fill 501.49 (adverse $0.01 each side)
-  gross = (501.49 - 501.51) * 100 = -2.00
-  slippage total = 2.00, commission total = 0.70
-  net pnl = -4.70, final capital = 99995.30
-  Last in-loop equity mark = 100000 + (501.5 - 501.51) * 100 = 99999.00
+* LONG entry fill = signal close + $0.01; SHORT entry fill = close - $0.01.
+* TARGET exits fill exactly (limit, no exit slippage).
+* STOP/EOD exits take adverse $0.01.
+* Commission is round-trip: 2 x $0.0035 x shares.
+* Trade pnl = gross fill difference - total slippage - total commission.
 
-The fallback close updates capital AFTER the last per-bar equity record, so
-ending equity disagrees with final capital until the engine records it.
+Base geometry: OR high 501.0 / low 499.0 (width 2.0), target_r 2.0.
 """
 
 import numpy as np
@@ -134,3 +131,115 @@ def test_eod_fallback_reconciles_capital_and_equity():
         )
         <= 0.01
     )
+
+
+def _session_frame(n=30, date_str="2024-01-02"):
+    """Processed-shaped single session with neutral flat bars."""
+    open_et = pd.Timestamp(f"{date_str} 09:30:00", tz="America/New_York")
+    ts = pd.date_range(start=open_et, periods=n, freq="1min")
+    idx = np.arange(n)
+    return pd.DataFrame({
+        "session_id": np.full(n, date_str),
+        "timestamp": ts,
+        "open": np.full(n, 500.0),
+        "high": np.full(n, 500.5),
+        "low": np.full(n, 499.5),
+        "close": np.full(n, 500.0),
+        "volume": np.full(n, 1000.0),
+        "minute_of_day": idx.astype(np.int32),
+        "is_opening_range": idx < 15,
+        "is_trading_window": idx >= 15,
+        "is_force_exit": np.zeros(n, dtype=bool),
+    })
+
+
+def _set_or(df):
+    df.loc[5, "high"] = 501.0
+    df.loc[8, "low"] = 499.0
+    return df
+
+
+def _assert_reconciles(result, cfg):
+    last_equity = float(result.equity_curve["equity"].iloc[-1])
+    assert result.final_capital == pytest.approx(
+        cfg.execution.initial_capital
+        + sum(t.pnl_dollars for t in result.trades)
+    )
+    assert abs(last_equity - result.final_capital) <= 0.01
+    return last_equity
+
+
+def test_short_target_hand_calculated():
+    """T09 SHORT + TARGET: entry 498.49, exit exactly 493.5, net +497.30."""
+    cfg = _eod_fixture_config()
+    df = _set_or(_session_frame())
+    df.loc[15, ["high", "low", "close"]] = [499.0, 498.0, 498.5]
+    df.loc[16, ["high", "low"]] = [498.0, 493.0]  # touches tp 493.5
+    df.loc[17:, "close"] = 495.0
+    df.loc[17:, "high"] = 496.0
+    df.loc[17:, "low"] = 494.0
+
+    result = BacktestEngine(config=cfg).run(df)
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    assert trade.direction == "SHORT"
+    assert trade.exit_reason == "TARGET"
+    assert trade.exit_price == pytest.approx(493.5)
+    assert trade.slippage_paid == pytest.approx(1.00)  # entry only
+    assert trade.commission_paid == pytest.approx(0.70)
+    assert trade.pnl_dollars == pytest.approx(497.30)
+    assert result.final_capital == pytest.approx(100497.30)
+    _assert_reconciles(result, cfg)
+
+
+def test_long_stop_hand_calculated():
+    """T09 LONG + STOP: entry 501.51, stop fill 498.99, net -254.70."""
+    cfg = _eod_fixture_config()
+    df = _set_or(_session_frame())
+    df.loc[15, ["high", "close"]] = [501.6, 501.5]
+    df.loc[16, ["high", "low"]] = [502.0, 498.0]  # stop, below target
+    df.loc[17:, "close"] = 500.0
+
+    result = BacktestEngine(config=cfg).run(df)
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    assert trade.exit_reason == "STOP"
+    assert trade.exit_price == pytest.approx(498.99)
+    assert trade.slippage_paid == pytest.approx(2.00)
+    assert trade.pnl_dollars == pytest.approx(-254.70)
+    assert result.final_capital == pytest.approx(99745.30)
+    _assert_reconciles(result, cfg)
+
+
+def test_same_bar_dual_touch_resolves_to_stop_exact():
+    """T09 dual touch: STOP wins with the same -254.70 fills as a pure stop."""
+    cfg = _eod_fixture_config()
+    df = _set_or(_session_frame())
+    df.loc[15, ["high", "close"]] = [501.6, 501.5]
+    df.loc[16, ["high", "low"]] = [507.0, 498.0]  # both brackets touched
+    df.loc[17:, "close"] = 500.0
+
+    result = BacktestEngine(config=cfg).run(df)
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    assert trade.exit_reason == "STOP"
+    assert trade.pnl_dollars == pytest.approx(-254.70)
+    _assert_reconciles(result, cfg)
+
+
+def test_zero_shares_takes_no_trade():
+    """T09: unaffordable sizing yields zero shares — no trade, flat capital."""
+    cfg = _eod_fixture_config()
+    import dataclasses
+
+    cfg = dataclasses.replace(
+        cfg,
+        execution=dataclasses.replace(cfg.execution, initial_capital=10.0),
+    )
+    df = _set_or(_session_frame())
+    df.loc[15, ["high", "close"]] = [501.6, 501.5]
+
+    result = BacktestEngine(config=cfg).run(df)
+    assert len(result.trades) == 0
+    assert result.final_capital == pytest.approx(10.0)
+    assert (result.equity_curve["equity"] == 10.0).all()

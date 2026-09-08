@@ -1,0 +1,5 @@
+# Dashboard-only dependencies (P2). Validated against Python 3.11 (.orb_venv)
+# on 2026-09-08 with the base requirements.txt environment.
+# Install: .orb_venv/bin/pip install -r requirements-dashboard.txt
+streamlit==1.63.0
+plotly==7.0.0

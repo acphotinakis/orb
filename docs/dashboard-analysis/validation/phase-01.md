@@ -174,3 +174,70 @@ T13 (identical-rerun identity equality) now guards it.
 
 P1-O4 remaining: time/calendar contract (P1-T11/P1-A5). No credentials used;
 no network access.
+
+---
+
+# P1-O4 record — accounting oracles, time/calendar semantics (appended 2026-09-08)
+
+## T09 accounting oracles (extends the U1 regression)
+
+`tests/unit/test_accounting_reconciliation.py` now hand-covers the full T09
+list (fixed 100-share sizing; all figures derived from the execution-model
+rules in the file header, never from implementation output): LONG+EOD
+(-4.70, the U1 isolation), SHORT+TARGET (+497.30, limit fill exactly 493.5,
+entry-only slippage), LONG+STOP (-254.70), same-bar dual touch (STOP, byte-
+identical fills to a pure stop), zero shares (capital $10 → no trade, flat
+equity). Every case asserts capital-path, equity-path, and metrics-path
+reconciliation. Comparison rule (P1-A4): full-precision internals with
+`pytest.approx`; currency-level reconciliation within $0.01. T10 empty/
+single/all-win/all-loss paths remain covered by the evaluation metric tests;
+`metrics.json` strict-parses (non-finite ratios use the `"inf"` convention).
+
+## Timestamp semantics (P1-A5, also in the engine module docstring)
+
+- Bar `timestamp` values are bar-OPEN times (raw UTC, ET after processing).
+- Entry/exit decisions evaluate bar CLOSE; availability = bar start +
+  timeframe duration (1Min 09:45 decision available 09:46). Recorded
+  `entry_time`/`exit_time` identify the deciding bar; the availability
+  instant is derived, not stored (per-event availability arrives with P4
+  tracing). A completed close is never treated as known at bar open.
+- Breakout requires strict inequality (close exactly at the range edge is
+  not a signal); only `is_opening_range` bars enter the OR (a late-session
+  extreme never widens a frozen range); dual-touch resolves to STOP.
+
+## Supported calendar/timeframe policy (tested; nothing broader claimed)
+
+| Case | Policy | Test |
+|---|---|---|
+| Regular RTH sessions 09:30–16:00 ET | Supported; minute_of_day from ET wall clock | T11 DST/geometry/coarse-TF |
+| Intraday minute/hour TFs with OR as a positive multiple of bar length | Supported (1Min/5Min verified; 15Min config) | `test_coarse_five_minute_timeframe_runs`, RunRequest combo rule |
+| Day/Week/Month resolutions, non-multiple OR/TF | Rejected explicitly (`options`/`data.timeframe` field errors) | P1-2 rejection tests |
+| Sessions missing OR bars (< expected count) | Pruned, never guessed; engine skips invalid-OR sessions flat | `test_missing_or_bar_prunes_session_without_guessing` |
+| Missing final bars / early closes (e.g. 13:00) | Fallback flattens at the last available bar; reconciliation still holds | `test_missing_final_bar_flattens_at_last_available_bar`, `test_early_close_session_flattens_at_1300` |
+| DST spring-forward / fall-back | RTH geometry unaffected (transitions occur outside RTH; UTC offset shifts -05:00/-04:00 without changing wall-clock layout) | `test_dst_spring_forward_session_geometry`, `test_dst_fall_back_session_geometry` |
+| Holiday calendars / early-close distinction / broker calendars | NOT claimed — deferred to P5 calendar work; unknown short sessions follow the missing-bars policy above | — (explicit non-claim) |
+
+---
+
+# Final P1 acceptance review (2026-09-08)
+
+Command: `MPLCONFIGDIR=/private/tmp/orb-dashboard-mpl .orb_venv/bin/python -m pytest tests -q`
+Result: **87 passed, 0 failed, 1 warning** (third-party websockets deprecation),
+default collection mode. Baseline at P1 entry: collection error + 21/12.
+
+| ID | Gate | Evidence | Status |
+|---|---|---|---|
+| P1-A1 | Offline suite green incl. repaired baselines + deterministic CLI (T01/T02/T12) | Package-marker collection fix; config/validator/metrics/drawdown/report repairs without weakened assertions; plots restored; CLI offline-success + 2 failures; 782/782-bar fixture intact | Pass |
+| P1-A2 | Supported controls documented; invalid/unsupported fail pre-side-effect (T03/T04) | 16 RunRequest tests + CLI exit-1 smoke; precedence/migration documented in `run_models` | Pass |
+| P1-A3 | Cache/refresh/corruption/publication identity (T05–T08, T13) | 21 cache/manifest/identity tests; object-pointer hash bug found+fixed by T13 | Pass |
+| P1-A4 | Flattened equity reconciles within $0.01; stricter float tolerance documented (T09/T10) | 5 hand-calc oracle tests + engine fallback fix (U1 cause); pipeline probe gap 0.0 (was +7.36) | Pass |
+| P1-A5 | Temporal tests pass; semantics documented; no broader claims (T11) | 9 temporal tests + engine docstring + support table above | Pass |
+| P1-A6 | Validated manifest + immutable artifacts per completed run (T08/T13) | Manifest content/completion/tamper tests; old-run byte stability; UUID IDs | Pass |
+
+Regression rule applied: all pre-existing suites pass unmodified in intent
+(only stale expectations corrected to documented contracts). CLI behavior
+remains covered; no credentials required for the suite or synthetic demo;
+failures surface as field-specific errors, never as silent success data.
+
+Phase 1 is complete on evidence above. Phase 2 may begin (entry gate: this
+record + green suite).
