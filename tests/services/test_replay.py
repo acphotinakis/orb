@@ -307,7 +307,101 @@ def test_checkpoints_match_and_seek_fast():
     assert elapsed < 0.5
 
 
+def test_replay_index_seek_budget_100k():
+    """P4-A7: ReplayIndex.seek() worst-case < 500 ms on a 100,000-event bar-heavy trace.
+
+    Uses a realistic trace composition (≈98% bar_observed events) so that both
+    the columnar bar index and the scalar checkpoint replay path are exercised.
+    20 random forward/backward seeks are timed individually; every single seek
+    must stay under the 500 ms budget, not just the mean.  The index build is a
+    one-time cost paid at session load, not included in the per-seek budget.
+    """
+    import random
+    import time as _time
+
+    base = pd.Timestamp("2024-01-02 09:30:00", tz="America/New_York")
+    events = []
+    open_trade_id = None
+    for i in range(100_000):
+        available = base + pd.Timedelta(minutes=i)
+        # Every 100th event: OR freeze marker (realistic OR boundary events)
+        if i % 100 == 50:
+            events.append({
+                "seq": i, "session_id": "2024-01-02",
+                "event_type": "or_frozen",
+                "bar_start": str(available), "available_at": str(available),
+                "valid": True, "or_high": 502.0, "or_low": 498.0, "or_width": 4.0,
+            })
+        # Sparse trade open/close pairs (every 300 bars) with equity marks
+        elif i % 300 == 200:
+            open_trade_id = i
+            events.append({
+                "seq": i, "session_id": "2024-01-02",
+                "event_type": "trade_opened",
+                "trade_id": i, "rule_id": "orb_breakout_close",
+                "direction": "LONG", "entry_price": 502.1, "shares": 100,
+                "stop_loss": 498.0, "take_profit": 510.0,
+                "bar_start": str(available), "available_at": str(available),
+            })
+        elif i % 300 == 250 and open_trade_id is not None:
+            events.append({
+                "seq": i, "session_id": "2024-01-02",
+                "event_type": "trade_closed",
+                "trade_id": open_trade_id, "pnl_dollars": 80.0,
+                "exit_reason": "TARGET", "rule_id": "exit_bracket",
+                "bar_start": str(available), "available_at": str(available),
+            })
+            open_trade_id = None
+        elif i % 300 == 275:
+            events.append({
+                "seq": i, "session_id": "2024-01-02",
+                "event_type": "equity_mark",
+                "bar_start": str(available), "available_at": str(available),
+                "cash": 100_000.0, "position_value": 0.0, "equity": 100_000.0,
+            })
+        # Default: bar_observed (the dominant event type — ≈98% of events)
+        else:
+            events.append({
+                "seq": i, "session_id": "2024-01-02",
+                "event_type": "bar_observed",
+                "bar_start": str(available), "available_at": str(available),
+                "open": 500.0, "high": 502.0, "low": 498.0, "close": 501.0,
+                "volume": 10_000.0, "minute_of_day": i % 390,
+                "is_opening_range": i < 15,
+            })
+
+    bar_count = sum(1 for e in events if e["event_type"] == "bar_observed")
+    assert len(events) == 100_000
+    assert bar_count / len(events) > 0.95, "Fixture must be bar-heavy (>95% bar_observed)"
+
+    # One-time index build (paid at session load, not per-seek)
+    index = replay.ReplayIndex(events, every=1000)
+
+    # 20 random seeks covering forward and backward jumps across the full range
+    rng = random.Random(99)
+    cursors = [rng.randrange(len(events) + 1) for _ in range(20)]
+
+    worst_ms = 0.0
+    for cursor in cursors:
+        t0 = _time.perf_counter()
+        state = index.seek(cursor, max_bars=2000)
+        elapsed_ms = (_time.perf_counter() - t0) * 1_000
+        worst_ms = max(worst_ms, elapsed_ms)
+        # Sanity: cursor is clamped correctly
+        assert state.cursor == cursor
+
+    mean_ms = sum(
+        (_time.perf_counter() - _time.perf_counter()) for _ in [0]
+    )  # placeholder — we report worst_ms
+    print(f"\nP4-A7 ReplayIndex seek: worst={worst_ms:.1f} ms over {len(cursors)} seeks "
+          f"(100,000-event bar-heavy trace, budget=500 ms)")
+    assert worst_ms < 500.0, (
+        f"P4-A7 FAIL: worst seek {worst_ms:.1f} ms exceeds 500 ms budget"
+    )
+
+
 def test_actual_formation_trace_cannot_leak_future_extremes(traced):
+
     cfg, df, _, _, events = traced
     session = "2024-01-02"
     original = replay.filter_session_events(events, session)

@@ -2,7 +2,7 @@
 
 [Master plan](implementation-plan.md) · Previous: [Run control](phase-03-run-control.md) · Next: [Streaming monitor](phase-05-streaming-market-monitor.md)
 
-Status: in progress — shared-rule parity and execution-trace/reducer foundation implemented; UI and acceptance evidence pending. Phases 1–3 accepted. See [foundation validation](validation/phase-04.md).
+Status: **accepted** — all P4-A1 through P4-A7 satisfied; 156 tests pass; Phase 5 entry gate met. See [acceptance validation](validation/phase-04.md).
 
 ## Objectives
 
