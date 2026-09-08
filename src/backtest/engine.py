@@ -46,6 +46,7 @@ class BacktestResult:
     daily_summary: pd.DataFrame
     initial_capital: float
     final_capital: float
+    cancelled: bool = False
 
 
 class BacktestEngine:
@@ -60,8 +61,26 @@ class BacktestEngine:
         self.signal_generator = SignalGenerator(config=config.strategy)
         self.execution_model = ExecutionModel(config=config.execution)
 
-    def run(self, df_processed: pd.DataFrame) -> BacktestResult:
-        """Executes full backtest across all sessions in df_processed."""
+    def run(
+        self,
+        df_processed: pd.DataFrame,
+        *,
+        progress: Optional[callable] = None,
+        cancel_requested: Optional[callable] = None,
+    ) -> BacktestResult:
+        """Executes full backtest across all sessions in df_processed.
+
+        Args:
+            df_processed: Canonical processed bars.
+            progress: Optional ``event -> None`` callback invoked at session
+                boundaries (``session_started``/``session_completed`` with
+                completed/total counts).  ``None`` preserves plain CLI use.
+            cancel_requested: Optional ``() -> bool`` polled between sessions
+                and every 64 bars.  When true at a boundary, the run stops and
+                the partial result is returned with ``cancelled=True`` on the
+                result container (trades/equity so far are retained, capital
+                reflects only closed trades).
+        """
         if df_processed.empty:
             logger.warning("Empty DataFrame passed to BacktestEngine.run().")
             return self._empty_result()
@@ -75,9 +94,33 @@ class BacktestEngine:
         equity_records: List[dict] = []
         daily_records: List[dict] = []
         trade_id_counter = 1
+        cancelled = False
 
+        def _emit(event: dict) -> None:
+            if progress is None:
+                return
+            try:
+                progress(event)
+            except Exception as exc:
+                logger.warning("Progress callback failed (%s); continuing.", exc)
+
+        def _cancelled() -> bool:
+            try:
+                return bool(cancel_requested and cancel_requested())
+            except Exception as exc:
+                logger.warning("Cancel hook failed (%s); continuing.", exc)
+                return False
+
+        total_sessions = session_groups.ngroups
+        completed_sessions = 0
         for session_id, session_bars in session_groups:
             session_id_str = str(session_id)
+            if _cancelled():
+                cancelled = True
+                logger.info("Cancellation acknowledged before session %s.", session_id_str)
+                break
+            _emit({"event_type": "session_started", "session_id": session_id_str,
+                   "completed_sessions": completed_sessions, "total_sessions": total_sessions})
             session_bars = session_bars.sort_values("timestamp").reset_index(drop=True)
 
             # 1. Opening Range phase: Compute & Freeze OR
@@ -115,7 +158,14 @@ class BacktestEngine:
             max_trades = self.config.strategy.max_trades_per_day
 
             # Replay all bars in the session
-            for idx, bar in session_bars.iterrows():
+            for bar_num, (_, bar) in enumerate(session_bars.iterrows()):
+                if bar_num % 64 == 0 and _cancelled():
+                    cancelled = True
+                    logger.info(
+                        "Cancellation acknowledged at bar %d of session %s.",
+                        bar_num, session_id_str,
+                    )
+                    break
                 ts = pd.Timestamp(bar["timestamp"])
                 high_p = float(bar["high"])
                 low_p = float(bar["low"])
@@ -209,6 +259,13 @@ class BacktestEngine:
                     "ending_equity": current_capital,
                 }
             )
+            if cancelled:
+                # Partial session retained as computed; not counted complete.
+                break
+            completed_sessions += 1
+            _emit({"event_type": "session_completed", "session_id": session_id_str,
+                   "completed_sessions": completed_sessions, "total_sessions": total_sessions,
+                   "trades_so_far": len(all_trades)})
 
         # Assemble Output DataFrames
         trades_df = (
@@ -249,6 +306,7 @@ class BacktestEngine:
             daily_summary=daily_df,
             initial_capital=self.config.execution.initial_capital,
             final_capital=current_capital,
+            cancelled=cancelled,
         )
 
     def _check_signal_at_bar(

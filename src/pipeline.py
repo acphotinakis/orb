@@ -84,6 +84,8 @@ class ORBPipeline:
         log_level: str = "INFO",
         base_dir: Optional[Union[str, Path]] = None,
         run_label: Optional[str] = None,
+        on_event: Optional[callable] = None,
+        cancel_requested: Optional[callable] = None,
     ) -> PipelineRunResult:
         """Execute the full pipeline workflow from data ingestion to reporting.
 
@@ -103,6 +105,14 @@ class ORBPipeline:
             base_dir: Base directory override for filesystem root.
             run_label: User-facing tag recorded in the manifest; never a
                 filesystem identity.
+            on_event: Optional ``event -> None`` callback for stage and
+                session progress (``run_started``, ``stage_started``,
+                ``session_started``, ``session_completed``, ``run_completed``,
+                ``run_failed``).  ``None`` preserves plain CLI use.
+            cancel_requested: Optional ``() -> bool`` polled between stages
+                and sessions (and every 64 bars).  When true at a boundary,
+                the run stops before further side effects and raises
+                :class:`CancelledRun`.
 
         Completion contract (P1-O3): artifacts are published atomically and
         the validated ``manifest.json`` is written last.  Only a present,
@@ -134,6 +144,38 @@ class ORBPipeline:
             run_id = uuid4().hex
         else:
             ensure_safe_component(run_id, field_name="run_id")
+
+        from src.common.exceptions import CancelledRun
+
+        def _emit(event_type: str, **fields: Any) -> None:
+            if on_event is None:
+                return
+            try:
+                on_event(
+                    {
+                        "schema_version": 1,
+                        "run_id": run_id,
+                        "event_type": event_type,
+                        "emitted_at": datetime.now(timezone.utc).isoformat(),
+                        **fields,
+                    }
+                )
+            except Exception as exc:
+                logger.warning("Progress callback failed (%s); continuing.", exc)
+
+        def _check_cancel(stage: str) -> None:
+            try:
+                requested = bool(cancel_requested and cancel_requested())
+            except Exception as exc:
+                logger.warning("Cancel hook failed (%s); continuing.", exc)
+                requested = False
+            if requested:
+                logger.info("Cancellation acknowledged before stage '%s'.", stage)
+                raise CancelledRun(
+                    f"Run cancelled before stage '{stage}'.", stage=stage
+                )
+
+        _emit("run_started", run_label=run_label)
 
         # ── Parse date bounds ─────────────────────────────────────────
         s_dt: Optional[datetime] = None
@@ -204,6 +246,8 @@ class ORBPipeline:
         artifacts: Dict[str, Path] = {}
 
         # ── Step 1: Data Ingestion ────────────────────────────────────
+        _check_cancel("fetch")
+        _emit("stage_started", stage="fetch")
         logger.info("[1/6] Ingesting raw historical bars (cache-first)...")
         raw_df = fetcher.fetch_and_cache(
             symbol=self.config.data.symbol,
@@ -230,6 +274,8 @@ class ORBPipeline:
                 artifacts[f"raw_candlestick_chart_{idx}"] = p
 
         # ── Step 2: Data Validation & Cleaning ───────────────────────
+        _check_cancel("validate")
+        _emit("stage_started", stage="validate")
         logger.info("[2/6] Validating OHLCV bar integrity and checking for gaps...")
         cleaned_df, report = validate_and_clean_bars(
             raw_df, timeframe=self.config.data.timeframe, strict=False
@@ -250,6 +296,8 @@ class ORBPipeline:
                 artifacts[f"cleaned_candlestick_chart_{idx}"] = p
 
         # ── Step 3: RTH Session Processing ────────────────────────────
+        _check_cancel("process")
+        _emit("stage_started", stage="process")
         # Identity (P1-O3): the processed dataset is keyed by every input
         # affecting its content.  Same identity → shared immutable directory;
         # changed inputs → a different directory, never a silent overwrite.
@@ -304,15 +352,29 @@ class ORBPipeline:
                 artifacts[f"processed_candlestick_chart_{idx}"] = p
 
         # ── Step 4: Event-Driven Backtest Simulation ──────────────────
+        _check_cancel("simulate")
+        _emit("stage_started", stage="simulate")
         logger.info(
             "[4/6] Executing bar-by-bar backtest simulation & dual-touch resolver..."
         )
-        backtest_result: BacktestResult = engine.run(processed_df)
+
+        def _engine_event(event: dict) -> None:
+            event = dict(event)
+            event_type = event.pop("event_type", "session_progress")
+            _emit(event_type, stage="backtest", **event)
+
+        backtest_result: BacktestResult = engine.run(
+            processed_df, progress=_engine_event, cancel_requested=cancel_requested
+        )
+        if backtest_result.cancelled:
+            raise CancelledRun("Run cancelled during simulation.", stage="simulate")
         logger.info(
             "Simulation completed: %d trades executed.", len(backtest_result.trades)
         )
 
         # ── Step 5: Performance & Risk Metrics ────────────────────────
+        _check_cancel("report")
+        _emit("stage_started", stage="report")
         logger.info("[5/6] Computing quantitative performance and risk metrics...")
         metrics = generate_performance_report(
             trades_df=backtest_result.trades_df,
@@ -321,6 +383,8 @@ class ORBPipeline:
         )
 
         # ── Step 6: Artifact Reporting & Persistence ──────────────────
+        _check_cancel("export")
+        _emit("stage_started", stage="export")
         logger.info("[6/6] Exporting CSV/JSON artifacts...")
         exported = reporter.export_all(
             backtest_result=backtest_result,
@@ -424,6 +488,11 @@ class ORBPipeline:
         manifest_path = publish_manifest_last(experiment_dir, manifest)
         artifacts["manifest_json"] = manifest_path
         logger.info("Manifest published: %s", manifest_path)
+        _emit(
+            "run_completed",
+            total_trades=len(backtest_result.trades),
+            elapsed_seconds=round(time.time() - t0, 2),
+        )
 
         # ── Console summary ───────────────────────────────────────────
         reporter.display_console_summary(metrics)

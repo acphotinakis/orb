@@ -8,8 +8,12 @@ submission, or streaming work. Entry gate was Phase 1 acceptance (87 green).
 ```
 .orb_venv/bin/pip install -r requirements-dashboard.txt  # streamlit==1.63.0, plotly==7.0.0 (pinned after validating)
 .orb_venv/bin/python -m src.dashboard.demo --root demo_runs   # ~seconds, real pipeline on synthetic bars
-.orb_venv/bin/streamlit run src/dashboard/app.py              # enter demo_runs in the sidebar
+PYTHONPATH=. .orb_venv/bin/streamlit run src/dashboard/app.py  # enter demo_runs in the sidebar
 ```
+
+NOTE (found during browser verification): the server must run with
+`PYTHONPATH=.` (repo root) or the app fails with `ModuleNotFoundError: No
+module named 'src'` — Streamlit puts only the script directory on `sys.path`.
 
 Base `requirements.txt` is unpinned and untouched; dashboard pins live in
 `requirements-dashboard.txt`. The install downgraded `websockets` 17.1 → 16.1.1
@@ -61,11 +65,44 @@ extrema preserved + full-resolution bytes), T12 + UI (AppTest: filtered-scope
 caption with full-run cards intact, run switch 3→0 trades, empty state).
 
 Full suite: **108 passed, 0 failed** (87 prior + 21 new), default mode.
-T11 (keyboard/narrow-layout walkthrough) is manual: all controls are native
-Streamlit widgets (keyboard-operable, visible focus) and every chart ships a
-text summary; a narrow-viewport pass remains a manual runbook step, as do
-screenshot captures (AppTest state assertions stand in for normal/empty/
-error renders in this record).
+
+## P2-A6 browser verification (real Chromium, Playwright 1.62.0)
+
+Harness is verification-only (NOT added to `requirements-dashboard.txt`).
+Evidence: `validation/phase-02-screenshots/` (`normal-wide.png`,
+`empty-state.png`, `narrow-390px.png`, `keyboard-focus.png`,
+`walkthrough.json`).
+
+- **Normal state (1440px):** 8 metric cards, synthetic badge, dataset/source
+  fingerprints, equity text summary all render; screenshot archived.
+- **Keyboard-only walkthrough:** 14 consecutive Tabs from the page body land
+  on INPUT, BUTTON, and link (A) elements only — every control (storage
+  root, run selector, filters, session/trade selectors, downloads) is a
+  native keyboard-focusable widget; no custom HTML/JS components exist in
+  the app (also asserted in-suite: no `unsafe_allow_html`, no `st.markdown`).
+  Streamlit's default theme provides the visible focus ring; the focus
+  screenshot shows the active control highlighted. Full flow (root → run →
+  filter → session → trade → download) is reachable without a pointer;
+  selectbox values change via arrows+Enter (AppTest asserts the resulting
+  state changes in-suite).
+- **Narrow layout (390px):** page stacks vertically with **0px horizontal
+  overflow** (measured `scrollWidth - innerWidth`); metric cards, tables,
+  and charts remain reachable by vertical scroll; screenshot archived
+  (full-page).
+- **Empty state:** invalid root renders the guidance text with the exact
+  demo command; screenshot archived.
+
+## Acceptance mapping (final)
+
+P2-A1 (offline demo) ✓, P2-A2 (parity/units/timezones) ✓, P2-A3 (corrupt/
+partial/legacy/disappearing) ✓, P2-A4 (read-only + storage containment) ✓,
+P2-A5 (bounded rendering, exports intact) ✓, P2-A6 (keyboard walkthrough +
+narrow layout + screenshots, this section) ✓.
+
+No credentials used; no network access; no simulation or market-data calls
+from any browsing path.
+
+**Phase 2 is fully accepted.** Phase 3 may begin (entry gate: this record).
 
 ## Timings (dev machine, demo fixtures)
 
@@ -75,12 +112,4 @@ Budgets for the 100k/10k fixture were verified structurally (bounded traces,
 checksum-equal downloads); replace with measured browser timings before any
 budget change.
 
-## Acceptance mapping
-
-P2-A1 (offline demo) ✓, P2-A2 (parity/units/timezones) ✓, P2-A3 (corrupt/
-partial/legacy/disappearing) ✓, P2-A4 (read-only + storage containment) ✓,
-P2-A5 (bounded rendering, exports intact) ✓, P2-A6 (keyboard-capable widgets
-+ text summaries; manual narrow pass outstanding, non-blocking) ✓.
-
-No credentials used; no network access; no simulation or market-data calls
-from any browsing path. Phase 3 may begin (entry gate: this record).
+**Phase 2 is fully accepted.** Phase 3 may begin (entry gate: this record).

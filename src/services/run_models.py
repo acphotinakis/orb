@@ -544,3 +544,24 @@ def build_run_request(
     )
     validate_request_values(request)
     return request
+
+
+# ---------------------------------------------------------------------------
+# Worker-side reconstruction
+# ---------------------------------------------------------------------------
+
+
+def app_config_from_dict(data: Mapping[str, Any]) -> AppConfig:
+    """Rebuild an :class:`AppConfig` from :meth:`AppConfig.to_dict` output.
+
+    Used by the worker process, which receives its configuration through the
+    durable registry instead of YAML files.
+    """
+    return AppConfig(
+        schema_version=str(data.get("schema_version", "1.0")),
+        strategy=StrategyConfig(**data.get("strategy", {})),
+        filters=FiltersConfig(**data.get("filters", {})),
+        data=DataConfig(**data.get("data", {})),
+        execution=ExecutionConfig(**data.get("execution", {})),
+        output=OutputConfig(**data.get("output", {})),
+    )

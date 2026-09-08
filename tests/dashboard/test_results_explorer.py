@@ -337,6 +337,63 @@ def test_app_marks_filtered_scope(demo_root):
     assert cards["Total trades"] == "3"
 
 
+def test_app_submit_flow_creates_watched_run(tmp_path):
+    """P3 UI: invalid requests fail in the form; valid ones submit + complete."""
+    import numpy as np
+
+    from streamlit.testing.v1 import AppTest
+
+    from src.services.run_service import RunService
+
+    raw_dir = tmp_path / "data" / "raw" / "SPY" / "sip" / "1Min"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    bars = []
+    for d in ["2024-01-02", "2024-01-03"]:
+        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert("UTC")
+        ts = pd.date_range(start=open_utc, periods=391, freq="1min")
+        n = len(ts)
+        bars.append(pd.DataFrame({
+            "timestamp": ts, "open": np.full(n, 500.0), "high": np.full(n, 500.5),
+            "low": np.full(n, 499.5), "close": np.full(n, 500.0),
+            "volume": np.full(n, 1000.0),
+        }))
+    pd.concat(bars, ignore_index=True).to_parquet(
+        raw_dir / "SPY_1Min_20240102_20240103.parquet",
+        engine="pyarrow", compression="zstd", index=False)
+
+    app_path = str(Path(__file__).resolve().parents[2] / "src" / "dashboard" / "app.py")
+    at = AppTest.from_file(app_path)
+    at.run()
+    at.sidebar.text_input[0].set_value(str(tmp_path)).run()
+    assert not at.exception
+
+    # Form widgets are flattened into the sidebar block: [root, symbol,
+    # start, end, watch]. Buttons: [Run submit, Cancel watched run].
+    at.sidebar.text_input[2].set_value("2024-01-02").run()  # start
+    at.sidebar.text_input[3].set_value("2024-01-03").run()  # end
+    at.sidebar.button[0].click().run()
+    assert not at.exception
+    watched = at.session_state["watched_run"]
+    assert watched
+
+    svc = RunService(tmp_path)
+    deadline = __import__("time").time() + 90
+    while __import__("time").time() < deadline:
+        if svc.get_run(watched)["status"] in ("succeeded", "failed", "cancelled"):
+            break
+        __import__("time").sleep(0.5)
+    assert svc.get_run(watched)["status"] == "succeeded"
+
+    # Invalid input surfaces a field error without submitting.
+    at2 = AppTest.from_file(app_path)
+    at2.run()
+    at2.sidebar.text_input[0].set_value(str(tmp_path)).run()
+    at2.sidebar.text_input[2].set_value("2024-02-30").run()  # impossible date
+    at2.sidebar.button[0].click().run()  # Run submit
+    assert "Invalid request" in " ".join(e.value for e in at2.error)
+    assert at2.session_state["watched_run"] == ""
+
+
 def test_app_run_switch_and_empty_state(demo_root, tmp_path):
     from streamlit.testing.v1 import AppTest
 
@@ -346,7 +403,7 @@ def test_app_run_switch_and_empty_state(demo_root, tmp_path):
     at.sidebar.text_input[0].set_value(str(demo_root)).run()
     first = {m.label: m.value for m in at.metric}["Total trades"]
     assert first == "3"
-    run_box = at.sidebar.selectbox[0]
+    run_box = at.sidebar.selectbox(key="run_selector")
     zero = [o for o in run_box.options if "zero trades" in o][0]
     run_box.set_value(zero).run()
     assert not at.exception

@@ -104,6 +104,17 @@ class ConfigurationError(ORBBaseException):
         super().__init__(prefix + message, **context)
 
 
+class CancelledRun(ORBBaseException):
+    """Control-flow signal: a run stop was requested at a safe boundary.
+
+    Raised by :meth:`src.pipeline.ORBPipeline.run` when its
+    ``cancel_requested`` hook fires between stages.  Partial work is left
+    unpublished (no manifest), so the run can never read as complete.
+    Workers translate this into a ``cancelled`` registry status; it is not
+    an error.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Data layer errors
 # ---------------------------------------------------------------------------

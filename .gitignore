@@ -17,4 +17,8 @@ data/processed/
 !docs/
 !src/
 
+# Local runtime dirs (registry, demo storage) — never commit
+runs/
+demo_runs/
+
 .orb_venv

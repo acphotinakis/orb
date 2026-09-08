@@ -39,6 +39,8 @@ from src.services.artifact_store import (
     to_et_display,
 )
 from src.common.exceptions import ConfigurationError
+from src.services.run_models import RESEARCH_PRESET_1MIN, build_run_request
+from src.services.run_service import RunService
 
 MAX_TABLE_ROWS = 500
 
@@ -102,6 +104,7 @@ def main() -> None:
     st.caption("Read-only: browsing never runs simulations or fetches market data.")
 
     root = st.sidebar.text_input("Storage root", value=".")
+    _run_control_section(root)
     try:
         runs = discover_runs(root)
     except Exception as exc:  # noqa: BLE001 — bad root must not crash the app
@@ -125,7 +128,7 @@ def main() -> None:
         return
 
     options = { _run_option_label(r): r.run_id for r in complete }
-    selected_label = st.sidebar.selectbox("Run", sorted(options))
+    selected_label = st.sidebar.selectbox("Run", sorted(options), key="run_selector")
     run_id = options[selected_label]
 
     try:
@@ -241,6 +244,94 @@ def main() -> None:
         with st.expander("Unsupported runs"):
             for run in others:
                 st.text(f"{run.run_id}: {run.status} — {run.detail}")
+
+
+def _run_control_section(root: str) -> None:
+    """Submit validated runs, poll durable progress, cancel, reconnect (P3)."""
+    st.sidebar.header("Run control")
+    # Lazy service: merely rendering the explorer must not create storage
+    # (read-only boundary — P2-A4). The registry initializes on first use.
+    _svc: list = []
+
+    def svc() -> RunService:
+        if not _svc:
+            _svc.append(RunService(root))
+        return _svc[0]
+    if "request_token" not in st.session_state:
+        import uuid as _uuid
+
+        st.session_state["request_token"] = _uuid.uuid4().hex
+    if "watched_run" not in st.session_state:
+        st.session_state["watched_run"] = ""
+
+    with st.sidebar.form("run_submit_form"):
+        symbol = st.text_input("Symbol", value="SPY")
+        start_date = st.text_input("Start date (YYYY-MM-DD)", value="")
+        end_date = st.text_input("End date (YYYY-MM-DD)", value="")
+        timeframe = st.selectbox("Timeframe", ["1Min", "5Min", "15Min"], index=0)
+        submitted = st.form_submit_button("Run")
+    watched = st.sidebar.text_input(
+        "Watch run ID (reconnect)", value=st.session_state["watched_run"]
+    )
+    st.session_state["watched_run"] = watched
+    if st.sidebar.button("Cancel watched run", disabled=not watched):
+        try:
+            new_status = svc().cancel_run(watched)
+            st.sidebar.text(f"Cancel → {new_status}")
+        except KeyError:
+            st.sidebar.error(f"Unknown run '{watched}'.")
+
+    if submitted:
+        try:
+            overrides = {"data": {"timeframe": timeframe}}
+            if symbol.strip():
+                overrides["strategy"] = {"ticker": symbol.strip().upper()}
+                overrides["data"]["symbol"] = symbol.strip().upper()
+            request = build_run_request(
+                "config/default_config.yaml",
+                config_overrides={**RESEARCH_PRESET_1MIN, **overrides},
+                options={
+                    "start_date": start_date.strip() or None,
+                    "end_date": end_date.strip() or None,
+                    "run_label": f"dashboard:{symbol.strip().upper()}",
+                    "log_level": "INFO",
+                },
+            )
+        except ConfigurationError as exc:
+            st.sidebar.error(f"Invalid request: {exc}")
+            return
+        except FileNotFoundError as exc:
+            st.sidebar.error(f"Config missing: {exc}")
+            return
+        run_id = svc().submit_run(request, st.session_state["request_token"])
+        st.session_state["watched_run"] = run_id
+        st.sidebar.text(f"Submitted run {run_id[:8]}… (retry-safe token)")
+
+    if st.session_state["watched_run"]:
+        _watch_fragment(root, st.session_state["watched_run"])
+
+
+@st.fragment(run_every=1)
+def _watch_fragment(root: str, run_id: str) -> None:
+    """Timed progress poll: display-only, never owns the job (P3-O3)."""
+    svc = RunService(root)
+    try:
+        row = svc.get_run(run_id)
+    except KeyError:
+        st.sidebar.error(f"Unknown run '{run_id}'.")
+        return
+    st.sidebar.text(f"Status: {row['status']}")
+    if row.get("error"):
+        st.sidebar.text(f"Error: {row['error'][:200]}")
+    try:
+        events = svc.get_events(run_id, limit=5)
+    except KeyError:
+        return
+    for event in events[-5:]:
+        st.sidebar.text(
+            f"#{event.get('seq')}: {event.get('event_type')} "
+            f"{event.get('stage', '')} {event.get('session_id', '')}"
+        )
 
 
 if __name__ == "__main__":
