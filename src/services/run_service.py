@@ -65,6 +65,7 @@ class RunService:
                 "start_date": request.start_date,
                 "end_date": request.end_date,
                 "refresh_cache": request.refresh_cache,
+                "record_trace": request.record_trace,
                 "generate_plots": request.generate_plots,
                 "log_level": request.log_level,
                 "run_label": request.run_label,

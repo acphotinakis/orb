@@ -55,7 +55,7 @@ def _request(days, label="t", plots=False):
     return build_run_request(
         "config/default_config.yaml",
         config_overrides={"data": {"timeframe": "1Min"}},
-        options={"start_date": days[0], "end_date": days[-1],
+        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1],
                  "generate_plots": plots, "run_label": label, "log_level": "WARNING"},
     )
 
@@ -171,7 +171,7 @@ def test_cancel_queued_never_launches(tmp_path):
     base_req = _request(days)
     payload = dict(
         config=base_req.config.to_dict(),
-        options={"start_date": days[0], "end_date": days[-1],
+        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1],
                  "refresh_cache": False, "generate_plots": False,
                  "log_level": "WARNING", "run_label": "q"},
         source={},
@@ -200,7 +200,7 @@ def test_cancel_running_and_terminal_passthrough(seeded, monkeypatch):
     run_id = reg.submit(
         request_token="cancel-run", run_label="cancel",
         config=req.config.to_dict(),
-        options={"start_date": days[0], "end_date": days[-1], "refresh_cache": False,
+        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1], "refresh_cache": False,
                  "generate_plots": False, "log_level": "WARNING", "run_label": "cancel"},
         source={},
     )
@@ -263,7 +263,7 @@ def test_killed_worker_reconciles_failed_without_rerun(seeded):
     req = build_run_request(
         "config/default_config.yaml",
         config_overrides={"data": {"timeframe": "1Min"}},
-        options={"start_date": more[0], "end_date": more[-1],
+        options={"refresh_cache": False, "start_date": more[0], "end_date": more[-1],
                  "generate_plots": False, "run_label": "doomed", "log_level": "WARNING"},
     )
     run_id = svc.submit_run(req, request_token="doomed")
@@ -297,7 +297,7 @@ def test_restart_while_live_dispatches_no_duplicate(seeded):
     req = build_run_request(
         "config/default_config.yaml",
         config_overrides={"data": {"timeframe": "1Min"}},
-        options={"start_date": more[0], "end_date": more[-1],
+        options={"refresh_cache": False, "start_date": more[0], "end_date": more[-1],
                  "generate_plots": False, "run_label": "live", "log_level": "WARNING"},
     )
     run_id = svc.submit_run(req, request_token="live-1")
@@ -333,7 +333,7 @@ def test_storage_failure_is_explicit_never_success(tmp_path):
     run_id = svc.registry.submit(
         request_token="disk-fail", run_label="disk",
         config=req.config.to_dict(),
-        options={"start_date": days[0], "end_date": days[-1], "refresh_cache": False,
+        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1], "refresh_cache": False,
                  "generate_plots": False, "log_level": "WARNING", "run_label": "disk"},
         source={},
     )
@@ -432,7 +432,7 @@ def test_cpu_loop_cancel_acknowledged_quickly(tmp_path):
     req = build_run_request(
         "config/default_config.yaml",
         config_overrides={"data": {"timeframe": "1Min"}},
-        options={"start_date": days[0], "end_date": days[-1],
+        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1],
                  "generate_plots": False, "run_label": "cpu-cancel",
                  "log_level": "WARNING"},
     )
@@ -461,7 +461,7 @@ def test_slow_fetch_keeps_status_responsive(seeded, monkeypatch):
     run_id = reg.submit(
         request_token="slow-1", run_label="slow",
         config=req.config.to_dict(),
-        options={"start_date": days[0], "end_date": days[-1], "refresh_cache": False,
+        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1], "refresh_cache": False,
                  "generate_plots": False, "log_level": "WARNING", "run_label": "slow"},
         source={},
     )

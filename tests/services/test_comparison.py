@@ -112,22 +112,24 @@ def test_single_point_overlap_aligns():
 
 
 def test_source_excerpt_obeys_allowlist(tmp_path):
-    repo = tmp_path
+    snapshot = {}
     with pytest.raises(ValueError, match="allowlist"):
-        read_source_excerpt(repo, "src/main.py")
+        read_source_excerpt(snapshot, "src/main.py")
     with pytest.raises(ValueError, match="allowlist"):
-        read_source_excerpt(repo, "../outside.py")
+        read_source_excerpt(snapshot, "../outside.py")
     with pytest.raises(ValueError, match="unavailable"):
-        read_source_excerpt(repo, "src/backtest/engine.py")
+        read_source_excerpt(snapshot, "src/backtest/engine.py")
 
 
 def test_source_excerpt_returns_function_block():
     import pathlib
 
     repo = pathlib.Path(__file__).resolve().parents[2]
-    excerpt = read_source_excerpt(repo, "src/strategy/signals.py",
+    from src.services.source_snapshot import capture_source_snapshot
+    snapshot = capture_source_snapshot(repo)
+    excerpt = read_source_excerpt(snapshot, "src/strategy/signals.py",
                                   function="evaluate_bar_signal")
     assert excerpt.startswith("def evaluate_bar_signal(")
     assert len(excerpt.splitlines()) <= 80
-    head = read_source_excerpt(repo, "src/strategy/signals.py", max_lines=5)
+    head = read_source_excerpt(snapshot, "src/strategy/signals.py", max_lines=5)
     assert head == "\n".join((repo / "src/strategy/signals.py").read_text().splitlines()[:5])

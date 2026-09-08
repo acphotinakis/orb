@@ -89,6 +89,7 @@ _OPTION_FIELDS = (
     "start_date",
     "end_date",
     "refresh_cache",
+    "record_trace",
     "generate_plots",
     "run_label",
     "log_level",
@@ -158,6 +159,7 @@ class RunRequest:
     config: AppConfig
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    record_trace: bool = False
     refresh_cache: bool = False
     generate_plots: bool = True
     run_label: Optional[str] = None
@@ -439,7 +441,7 @@ def validate_request_values(request: RunRequest) -> None:
         )
 
     # Real booleans and known log level.
-    for name in ("refresh_cache", "generate_plots"):
+    for name in ("refresh_cache", "generate_plots", "record_trace"):
         if not isinstance(getattr(request, name), bool):
             raise ConfigurationError(
                 f"{name} must be a real boolean.",
@@ -512,7 +514,7 @@ def build_run_request(
 
     # Option values arriving via YAML are untyped: enforce strict types here,
     # before any coercion, so string "true"/1 cannot silently become True.
-    for name in ("refresh_cache", "generate_plots"):
+    for name in ("refresh_cache", "generate_plots", "record_trace"):
         if name in merged_options and not isinstance(merged_options[name], bool):
             raise ConfigurationError(
                 f"{name} must be a real boolean; got {merged_options[name]!r}.",
@@ -537,6 +539,7 @@ def build_run_request(
         config=config,
         start_date=merged_options.get("start_date"),
         end_date=merged_options.get("end_date"),
+        record_trace=bool(merged_options.get("record_trace", False)),
         refresh_cache=bool(merged_options.get("refresh_cache", False)),
         generate_plots=bool(merged_options.get("generate_plots", True)),
         run_label=merged_options.get("run_label"),

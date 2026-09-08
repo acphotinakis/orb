@@ -31,6 +31,7 @@ from src.data.validator import validate_and_clean_bars
 from src.data.processor import DataProcessor
 from src.backtest.engine import BacktestEngine, BacktestResult
 from src.backtest.trace import TraceCollector
+from src.common.time_utils import get_timeframe_minutes
 from src.evaluation.metrics import generate_performance_report
 from src.evaluation.reporter import ResultsReporter
 from src.visualization.candlestick_data_plotter import CandlestickDataPlotter
@@ -368,6 +369,10 @@ class ORBPipeline:
             event_type = event.pop("event_type", "session_progress")
             _emit(event_type, stage="backtest", **event)
 
+        from src.services.source_snapshot import capture_source_snapshot
+
+        execution_source = source_code_fingerprint()
+        source_snapshot = capture_source_snapshot() if record_trace else None
         collector = TraceCollector() if record_trace else None
         backtest_result: BacktestResult = engine.run(
             processed_df, progress=_engine_event, cancel_requested=cancel_requested,
@@ -405,9 +410,15 @@ class ORBPipeline:
         if collector is not None:
             from src.services.artifact_store import atomic_write_text
 
+            import json
+
+            snapshot_path = paths.results_dir / "source_snapshot.json"
+            atomic_write_text(snapshot_path, json.dumps(source_snapshot, sort_keys=True))
+            artifacts["source_snapshot"] = snapshot_path
             trace_path = paths.results_dir / "decision_trace.jsonl"
             atomic_write_text(
-                trace_path, collector.to_jsonl(run_id=run_id)
+                trace_path, collector.to_jsonl(run_id=run_id, initial_capital=self.config.execution.initial_capital,
+                                                 bar_minutes=get_timeframe_minutes(self.config.data.timeframe))
             )
             artifacts["decision_trace"] = trace_path
             logger.info(
@@ -471,10 +482,11 @@ class ORBPipeline:
                 "start_date": start_date,
                 "end_date": end_date,
                 "refresh_cache": refresh_cache,
+                "record_trace": record_trace,
                 "generate_plots": generate_plots,
                 "log_level": log_level,
             },
-            source_dict=source_code_fingerprint(),
+            source_dict=execution_source,
             datasets_dict={
                 "raw": {
                     "fingerprint": source_fingerprint,

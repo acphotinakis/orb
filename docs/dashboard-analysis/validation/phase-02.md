@@ -8,12 +8,12 @@ submission, or streaming work. Entry gate was Phase 1 acceptance (87 green).
 ```
 .orb_venv/bin/pip install -r requirements-dashboard.txt  # streamlit==1.63.0, plotly==7.0.0 (pinned after validating)
 .orb_venv/bin/python -m src.dashboard.demo --root demo_runs   # ~seconds, real pipeline on synthetic bars
-PYTHONPATH=. .orb_venv/bin/streamlit run src/dashboard/app.py  # enter demo_runs in the sidebar
+.orb_venv/bin/streamlit run src/dashboard/app.py  # enter demo_runs in the sidebar
 ```
 
-NOTE (found during browser verification): the server must run with
-`PYTHONPATH=.` (repo root) or the app fails with `ModuleNotFoundError: No
-module named 'src'` — Streamlit puts only the script directory on `sys.path`.
+Launch fix: the app now adds the repository root resolved from its own file
+to `sys.path` before importing project modules. The earlier browser verification
+required `PYTHONPATH=.`; that workaround is no longer necessary.
 
 Base `requirements.txt` is unpinned and untouched; dashboard pins live in
 `requirements-dashboard.txt`. The install downgraded `websockets` 17.1 → 16.1.1

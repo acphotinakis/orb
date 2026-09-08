@@ -16,11 +16,12 @@ are never a replay data source. Equal availability times are resolved by seq.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import pandas as pd
+import math
 
 CHECKPOINT_EVERY = 5_000
 
@@ -40,6 +41,8 @@ class ReplayState:
     open_position: Optional[Mapping[str, Any]]
     closed_trades: Tuple[Mapping[str, Any], ...] = ()
     realized_pnl: float = 0.0
+    equity: pd.DataFrame = field(default_factory=pd.DataFrame)
+    decision: Optional[Mapping[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -214,6 +217,120 @@ def filter_session_events(
     return [e for e in events if e.get("session_id") == session_id]
 
 
+@dataclass(frozen=True)
+class Playback:
+    cursor: int = 0
+    playing: bool = False
+    speed: float = 1.0
+    next_due: float = 0.0
+
+
+def playback_action(state: Playback, action: str, total: int, now: float,
+                    value: float | None = None) -> Playback:
+    """One scheduled action advances at most once; rerenders cannot catch up."""
+    from dataclasses import replace
+    if action == "reset":
+        return Playback(speed=state.speed)
+    if action == "pause":
+        return replace(state, playing=False)
+    if action == "play":
+        return replace(state, playing=state.cursor < total, next_due=now + 1 / state.speed)
+    if action == "speed":
+        if value not in (0.5, 1.0, 2.0, 4.0, 8.0):
+            raise ValueError("Unsupported playback speed")
+        return replace(state, speed=value, next_due=now + 1 / value)
+    if action in ("step", "seek"):
+        cursor = min(total, max(0, state.cursor + 1 if action == "step" else int(value)))
+        return replace(state, cursor=cursor, playing=False)
+    if action == "tick":
+        if state.playing and now >= state.next_due:
+            cursor = min(total, state.cursor + 1)
+            return replace(state, cursor=cursor, playing=cursor < total, next_due=now + 1 / state.speed)
+        return state
+    raise ValueError("Unknown playback action")
+
+
+class ReplayIndex:
+    """Build once, seek with <=1,000 scalar events and indexed dataframe slices.
+
+    OHLCV, trades and equity each have a single columnar index, not a copied
+    history per checkpoint. Checkpoints retain only range/position/P&L scalars.
+    Presentation copies only the requested prefix (or a bounded chart tail).
+    """
+    def __init__(self, events, every=1000):
+        from bisect import bisect_right
+        if every < 1:
+            raise ValueError("Checkpoint interval must be positive")
+        self.events = tuple(events)
+        self.every = every
+        self.checkpoints = {0: self._empty()}
+        self.bar_at, self.trade_at, self.equity_at = [], [], []
+        bars, trades, equity = [], [], []
+        scalar = self._empty()
+        for cursor, event in enumerate(events, 1):
+            self._apply(scalar, event)
+            kind = event["event_type"]
+            if kind == "bar_observed":
+                self.bar_at.append(cursor)
+                bars.append({"timestamp": pd.Timestamp(event["bar_start"]),
+                             **{k: event[k] for k in ("open", "high", "low", "close", "volume",
+                                                     "minute_of_day", "is_opening_range")}})
+            elif kind == "trade_closed":
+                self.trade_at.append(cursor)
+                trades.append(dict(event))
+            elif kind == "equity_mark":
+                self.equity_at.append(cursor)
+                equity.append({"timestamp": pd.Timestamp(event["bar_start"]),
+                               "session_id": event["session_id"],
+                               **{k: event[k] for k in ("cash", "position_value", "equity")}})
+            if cursor % every == 0:
+                self.checkpoints[cursor] = scalar.copy()
+        self.bars = pd.DataFrame(bars, columns=["timestamp", "open", "high", "low", "close", "volume",
+                                               "minute_of_day", "is_opening_range"])
+        self.trades = tuple(trades)
+        self.equity = pd.DataFrame(equity, columns=["timestamp", "session_id", "cash", "position_value", "equity"])
+
+    @staticmethod
+    def _empty():
+        return dict(time=None, position=None, pnl=0.0, high=None, low=None,
+                    frozen=False, frozen_high=None, frozen_low=None, decision=None)
+
+    @staticmethod
+    def _apply(s, event):
+        s["time"] = _parse_time(event.get("available_at")) or s["time"]
+        kind = event["event_type"]
+        if kind == "bar_observed" and event["is_opening_range"]:
+            s["high"] = event["high"] if s["high"] is None else max(s["high"], event["high"])
+            s["low"] = event["low"] if s["low"] is None else min(s["low"], event["low"])
+        elif kind == "or_frozen":
+            s.update(frozen=True, frozen_high=event.get("or_high"), frozen_low=event.get("or_low"))
+        elif kind == "trade_opened":
+            s["position"] = dict(event)
+        elif kind == "trade_closed":
+            if s["position"] is not None and s["position"].get("trade_id") == event.get("trade_id"):
+                s["position"] = None
+            s["pnl"] += float(event.get("pnl_dollars", 0))
+        if event.get("rule_id"):
+            s["decision"] = dict(event)
+
+    def seek(self, cursor: int, max_bars: int | None = None) -> ReplayState:
+        from bisect import bisect_right
+        cursor = max(0, min(len(self.events), cursor))
+        start = cursor // self.every * self.every
+        scalar = self.checkpoints[start].copy()
+        for event in self.events[start:cursor]:
+            self._apply(scalar, event)
+        n = bisect_right(self.bar_at, cursor)
+        first = max(0, n - max_bars) if max_bars is not None else 0
+        return ReplayState(
+            cursor, scalar["time"], self.bars.iloc[first:n].copy(),
+            scalar["high"], scalar["low"], scalar["frozen"],
+            scalar["frozen_high"], scalar["frozen_low"], scalar["position"],
+            self.trades[:bisect_right(self.trade_at, cursor)], scalar["pnl"],
+            self.equity.iloc[:bisect_right(self.equity_at, cursor)].copy(), scalar["decision"],
+        )
+
+
 # ---------------------------------------------------------------------------
 # Comparison (P4-O3): explicit compatibility, aligned overlays
 # ---------------------------------------------------------------------------
@@ -263,8 +380,16 @@ def compatibility_notes(
 ) -> List[str]:
     """Human-readable input-compatibility labels (never silent overlays)."""
     notes: List[str] = []
-    dataset_a = manifest_a.get("datasets", {}).get("processed", {})
-    dataset_b = manifest_b.get("datasets", {}).get("processed", {})
+    def inputs(manifest):
+        datasets = manifest.get("datasets", {})
+        processed = datasets.get("processed", {})
+        return {**manifest.get("config", {}).get("data", {}),
+                **datasets.get("raw", {}), **processed.get("identity", {}), **processed}
+    dataset_a, dataset_b = inputs(manifest_a), inputs(manifest_b)
+    if manifest_a.get("source") != manifest_b.get("source"):
+        notes.append("Different recorded source revisions/fingerprints.")
+    if dataset_a.get("fingerprint") != dataset_b.get("fingerprint"):
+        notes.append("Different data content fingerprints.")
     for label, path in (
         ("symbol", "symbol"),
         ("feed", "feed"),
@@ -304,6 +429,8 @@ def align_equity(
         raise ValueError("mode must be 'common' or 'full'")
     left = equity_a[["timestamp", "equity"]].rename(columns={"equity": "equity_a"})
     right = equity_b[["timestamp", "equity"]].rename(columns={"equity": "equity_b"})
+    left = left.assign(timestamp=pd.to_datetime(left.timestamp, utc=True)).drop_duplicates("timestamp", keep="last")
+    right = right.assign(timestamp=pd.to_datetime(right.timestamp, utc=True)).drop_duplicates("timestamp", keep="last")
     merged = pd.merge(left, right, on="timestamp", how="inner" if mode == "common" else "outer")
     merged = merged.sort_values("timestamp").reset_index(drop=True)
     if mode == "full":
@@ -315,7 +442,7 @@ def normalized_returns(
     aligned: pd.DataFrame, initial_a: float, initial_b: float
 ) -> pd.DataFrame:
     """Add explicitly-baselined normalized return columns (no silent policy)."""
-    if not initial_a or initial_a <= 0 or not initial_b or initial_b <= 0:
+    if any(not isinstance(x, (int, float)) or isinstance(x, bool) or not math.isfinite(x) or x <= 0 for x in (initial_a, initial_b)):
         raise ValueError(
             "Normalized returns require positive starting equity for both runs."
         )
@@ -330,42 +457,8 @@ def normalized_returns(
 # ---------------------------------------------------------------------------
 
 
-def read_source_excerpt(
-    repo_root: str | Path,
-    module: str,
-    function: Optional[str] = None,
-    max_lines: int = 80,
-) -> str:
-    """Return a read-only excerpt of an allowlisted repository source file.
-
-    Args:
-        repo_root: Repository root confining all reads.
-        module: Allowlisted ``src/...`` module path.
-        function: Optional ``def <name>`` anchor; returns that block when
-            found, else the file head.
-        max_lines: Excerpt cap.
-
-    Raises:
-        ValueError: Module outside the allowlist or unreadable.  Current
-        worktree text is returned as-is; callers label it with the RECORDED
-        revision/fingerprint and an unavailable note when snapshots are
-        missing — current code never masquerades as historical code.
-    """
-    from pathlib import Path as _Path
-
-    from src.backtest.trace import TRACE_SOURCE_ALLOWLIST
-    from src.services.artifact_store import ensure_within_root
-
-    if module not in TRACE_SOURCE_ALLOWLIST:
-        raise ValueError(f"Module '{module}' is outside the source allowlist.")
-    root = _Path(repo_root)
-    target = ensure_within_root(root, root / module)
-    try:
-        lines = target.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
-        raise ValueError(f"Source '{module}' is unavailable: {exc}.")
-    if function:
-        for index, line in enumerate(lines):
-            if line.startswith(f"def {function}("):
-                return "\n".join(lines[index:index + max_lines])
-    return "\n".join(lines[:max_lines])
+def read_source_excerpt(snapshot: Mapping[str, Any], module: str,
+                        function: Optional[str] = None, max_lines: int = 80) -> str:
+    """Read only a verified historical snapshot; never consult the worktree."""
+    from src.services.source_snapshot import historical_source
+    return "\n".join(historical_source(snapshot, module, function).splitlines()[:max_lines])

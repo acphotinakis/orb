@@ -77,6 +77,7 @@ def run_worker(storage_root: str | Path, run_id: str) -> int:
             start_date=options.get("start_date"),
             end_date=options.get("end_date"),
             refresh_cache=bool(options.get("refresh_cache", False)),
+            record_trace=bool(options.get("record_trace", False)),
             generate_plots=bool(options.get("generate_plots", True)),
             run_id=run_id,
             base_dir=root,

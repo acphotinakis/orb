@@ -95,3 +95,34 @@ def synthetic_rth_bars() -> pd.DataFrame:
         "is_trading_window": (np.arange(n) >= 15) & (np.arange(n) < 389),
         "is_force_exit": np.arange(n) >= 389,
     })
+
+
+def pytest_addoption(parser):
+    parser.addoption("--real-provider", action="store_true", default=False,
+                     help="Explicitly enable tests marked real_provider")
+
+
+def pytest_collection_modifyitems(config, items):
+    if not config.getoption("--real-provider"):
+        for item in items:
+            if item.get_closest_marker("real_provider"):
+                item.add_marker(pytest.mark.skip(reason="requires --real-provider"))
+
+
+@pytest.fixture(autouse=True)
+def offline_network_guard(request, monkeypatch):
+    """Fail before DNS/connect, in this process AND all Python subprocesses."""
+    import os
+    import socket
+    from pathlib import Path
+    from tests.support.sitecustomize import deny_network
+
+    if request.node.get_closest_marker("real_provider") and request.config.getoption("--real-provider"):
+        return
+    monkeypatch.setenv("ORB_TEST_OFFLINE", "1")
+    support = str(Path(__file__).parent / "support")
+    monkeypatch.setenv("PYTHONPATH", support + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    for name in ("connect", "connect_ex"):
+        monkeypatch.setattr(socket.socket, name, deny_network)
+    monkeypatch.setattr(socket, "create_connection", deny_network)
+    monkeypatch.setattr(socket, "getaddrinfo", deny_network)

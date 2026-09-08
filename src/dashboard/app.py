@@ -18,6 +18,14 @@ Run::
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+
+# Streamlit executes this file with the script directory on sys.path.
+# Resolve the checkout from the file so direct launches also work without
+# PYTHONPATH, regardless of the caller's working directory.
+_REPOSITORY_ROOT = str(Path(__file__).resolve().parents[2])
+if _REPOSITORY_ROOT not in sys.path:
+    sys.path.insert(0, _REPOSITORY_ROOT)
 
 import pandas as pd
 import streamlit as st
@@ -138,6 +146,15 @@ def main() -> None:
         return
 
     manifest = art.manifest
+    mode = st.sidebar.radio("View", ["Completed results", "Replay", "Compare"], key="view_mode")
+    if mode == "Replay":
+        from src.dashboard.replay_view import render_replay
+        render_replay(root, run_id, manifest)
+        return
+    if mode == "Compare":
+        from src.dashboard.comparison_view import render_comparison
+        render_comparison(root, run_id, art, options)
+        return
     if is_synthetic_run(manifest):
         st.warning("Synthetic demonstration data — not market results.")
     st.text(f"Run: {manifest.get('run_label') or run_id}")
@@ -269,6 +286,8 @@ def _run_control_section(root: str) -> None:
         start_date = st.text_input("Start date (YYYY-MM-DD)", value="")
         end_date = st.text_input("End date (YYYY-MM-DD)", value="")
         timeframe = st.selectbox("Timeframe", ["1Min", "5Min", "15Min"], index=0)
+        refresh = st.checkbox("Refresh provider data", value=False)
+        record_trace = st.checkbox("Record replay trace", value=False)
         submitted = st.form_submit_button("Run")
     watched = st.sidebar.text_input(
         "Watch run ID (reconnect)", value=st.session_state["watched_run"]
@@ -295,6 +314,8 @@ def _run_control_section(root: str) -> None:
                     "end_date": end_date.strip() or None,
                     "run_label": f"dashboard:{symbol.strip().upper()}",
                     "log_level": "INFO",
+                    "refresh_cache": refresh,
+                    "record_trace": record_trace,
                 },
             )
         except ConfigurationError as exc:

@@ -145,6 +145,16 @@ class BacktestEngine:
             ) + pd.Timedelta(minutes=self.config.strategy.opening_range_minutes)
             freeze_recorded = False
 
+            def record_equity(row):
+                if trace is not None:
+                    trace.record(
+                        "equity_mark", session_id=session_id_str,
+                        bar_start=str(row["timestamp"]),
+                        available_at=str(pd.Timestamp(row["timestamp"]) + pd.Timedelta(minutes=bar_minutes)),
+                        cash=float(row["cash"]), position_value=float(row["position_value"]),
+                        equity=float(row["equity"]),
+                    )
+
             def record_bar(bar):
                 nonlocal freeze_recorded
                 if trace is None:
@@ -186,6 +196,7 @@ class BacktestEngine:
                             "equity": current_capital,
                         }
                     )
+                    record_equity(equity_records[-1])
                 daily_records.append(
                     {
                         "date": session_id_str,
@@ -226,6 +237,14 @@ class BacktestEngine:
                         bar=bar,
                         position=active_position,
                     )
+                    if trace is not None and closed_trade is None:
+                        trace.record(
+                            "position_check", session_id=session_id_str,
+                            rule_id=RULE_EXIT_BRACKET, outcome="held",
+                            stop_loss=active_position.stop_loss, take_profit=active_position.take_profit,
+                            high=high_p, low=low_p, close=close_p,
+                            bar_start=str(ts), available_at=str(ts + pd.Timedelta(minutes=bar_minutes)),
+                        )
                     if closed_trade is not None:
                         all_trades.append(closed_trade)
                         current_capital += closed_trade.pnl_dollars
@@ -239,6 +258,7 @@ class BacktestEngine:
                                 rule_id=RULE_FLATTEN
                                 if reason == "EOD" and bool(bar.get("is_force_exit", False))
                                 else RULE_EXIT_BRACKET,
+                                trade=closed_trade.to_dict(),
                                 exit_reason=reason,
                                 exit_price=float(closed_trade.exit_price),
                                 pnl_dollars=float(closed_trade.pnl_dollars),
@@ -282,6 +302,12 @@ class BacktestEngine:
                             trade_id=trade_id_counter,
                             bar=bar,
                         )
+                        if pos is None and trace is not None:
+                            trace.record(
+                                "execution_rejected", session_id=session_id_str,
+                                rule_id=RULE_BREAKOUT_CLOSE, outcome="rejected", reason="zero_size",
+                                bar_start=str(ts), available_at=str(ts + pd.Timedelta(minutes=bar_minutes)),
+                            )
                         if pos is not None:
                             active_position = pos
                             session_trades_count += 1
@@ -339,6 +365,7 @@ class BacktestEngine:
                         "equity": mtm_equity,
                     }
                 )
+                record_equity(equity_records[-1])
 
             # End of session audit: Ensure no position left open
             if active_position is not None:
@@ -358,6 +385,7 @@ class BacktestEngine:
                         session_id=session_id_str,
                         trade_id=closed_trade.trade_id,
                         rule_id=RULE_FLATTEN,
+                        trade=closed_trade.to_dict(),
                         exit_reason="EOD",
                         exit_price=float(closed_trade.exit_price),
                         pnl_dollars=float(closed_trade.pnl_dollars),
@@ -376,6 +404,7 @@ class BacktestEngine:
                         "equity": current_capital,
                     }
                 )
+                record_equity(equity_records[-1])
 
             daily_pnl = current_capital - session_start_capital
             daily_records.append(

@@ -650,6 +650,7 @@ DOWNLOAD_ALLOWLIST = (
     "results/daily_summary.csv",
     "results/metrics.json",
     "results/decision_trace.jsonl",
+    "results/source_snapshot.json",
     "config_snapshot.yaml",
 )
 
