@@ -2,7 +2,7 @@
 
 [Master plan](implementation-plan.md) · Previous: [Replay and comparison](phase-04-replay-comparison-code-trace.md)
 
-Status: proposed. Entry gate: Phases 1–4 accepted; shared rules and availability-time semantics established.
+Status: **accepted** — all P5-A1 through P5-A7 satisfied; 175 tests pass. See [acceptance validation](validation/phase-05.md).
 
 ## Objectives
 

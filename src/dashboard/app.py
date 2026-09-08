@@ -146,7 +146,7 @@ def main() -> None:
         return
 
     manifest = art.manifest
-    mode = st.sidebar.radio("View", ["Completed results", "Replay", "Compare"], key="view_mode")
+    mode = st.sidebar.radio("View", ["Completed results", "Replay", "Compare", "Market Monitor"], key="view_mode")
     if mode == "Replay":
         from src.dashboard.replay_view import render_replay
         render_replay(root, run_id, manifest)
@@ -154,6 +154,14 @@ def main() -> None:
     if mode == "Compare":
         from src.dashboard.comparison_view import render_comparison
         render_comparison(root, run_id, art, options)
+        return
+    if mode == "Market Monitor":
+        from src.dashboard.monitor_view import render_monitor
+        render_monitor(
+            symbol=manifest.get("config", {}).get("data", {}).get("symbol", "SPY"),
+            feed=manifest.get("config", {}).get("data", {}).get("feed", "sip"),
+            timeframe=manifest.get("config", {}).get("data", {}).get("timeframe", "1Min"),
+        )
         return
     if is_synthetic_run(manifest):
         st.warning("Synthetic demonstration data — not market results.")
