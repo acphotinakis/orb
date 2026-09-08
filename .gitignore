@@ -16,3 +16,5 @@ data/processed/
 !config/
 !docs/
 !src/
+
+.orb_venv

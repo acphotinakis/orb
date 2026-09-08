@@ -1,5 +1,5 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:mamba",
-    "python-envs.defaultPackageManager": "ms-python.python:mamba",
+    "python-envs.defaultEnvManager": "ms-python.python:venv",
+    "python-envs.defaultPackageManager": "ms-python.python:pip",
     "files.trimTrailingWhitespace": true
 }
