@@ -68,5 +68,47 @@ Files changed: `src/backtest/engine.py`, `src/evaluation/metrics.py`,
 `tests/evaluation/test_metrics.py`, `tests/integration/test_pipeline_e2e.py`;
 added `tests/**/__init__.py` (x5), `tests/unit/test_accounting_reconciliation.py`.
 
-No credentials used; no network access; no live orders. P1-A2..A6 work
-(RunRequest, cache identity, manifests, calendar policy) remains open.
+No credentials used; no network access; no live orders. P1-2…P1-6 (RunRequest, cache identity, manifests, calendar policy) remains open.
+
+---
+
+# P1-2 record — RunRequest and shared validation (appended 2026-09-08)
+
+Scope: P1-O2 only. New module `src/services/run_models.py` is the single entry
+point (`build_run_request`) for CLI / dashboard / worker.
+
+## What was built
+
+- `RunRequest` (frozen): effective `AppConfig` + `start_date`/`end_date`,
+  `refresh_cache`, `generate_plots`, `run_label`, `log_level`.
+- YAML `parameters:` migration as *defaults* (explicit section values and
+  explicit caller values win): `symbol` → ticker+symbol defaults, `feed` /
+  `is_paper` → data defaults, dates/refresh/plots/log_level → option defaults.
+  Unknown `parameters` keys, override paths, and option keys raise
+  `ConfigurationError` (typo safety). `None` options never clobber migrated
+  defaults.
+- Request checks beyond `validate_config`: ticker==symbol (non-blank),
+  real-clock `force_exit_time` (`24:00:00` rejected), `intrabar` / `atr` /
+  enabled filters rejected with field-specific errors, intraday-only
+  timeframes with OR-multiple rule, ordered real calendar dates, strict
+  bool/log-level/label rules, finite non-bool numerics in overrides.
+- `RESEARCH_PRESET_1MIN` constant (dashboard preset; checked-in YAML default
+  unchanged). `run_label` is label-only; CLI forwards `--run-id`
+  transitionally until P1-O3 UUIDs split labels from filesystem identities.
+- CLI now builds through `build_run_request`; `--paper`/`--no-paper` pair with
+  default `None` (explicit choice only, YAML otherwise preserved);
+  `log_level` forwarded into `pipeline.run` (previously dropped);
+  `main(argv=None)` for in-process use.
+
+## Evidence
+
+- `tests/services/test_run_models.py`: 16 tests (T03 precedence/migration/
+  preset/preserved options; T04 all rejection classes incl. `24:00:00`,
+  `2024-02-30`, reversed dates, NaN/inf, string bools, `1Day`/`30Min` combos,
+  each unsupported control with field assertion).
+- Full suite: **53 passed, 0 failed** (37 P1-O1 + 16 P1-2), default mode.
+- CLI smoke: `--help` lists the pair; `--timeframe BogusTF` exits 1 with a
+  field-specific `ConfigurationError`.
+
+P1-O3/O4 remaining: cache identity + immutable manifests, then time/calendar
+contract. No credentials used; no network access.

@@ -81,6 +81,11 @@ from src.common.time_utils import (
     to_eastern,
     get_timeframe_minutes,
 )
+from src.services.artifact_store import (
+    atomic_write_parquet,
+    atomic_write_text,
+    cache_key_lock,
+)
 
 logger = get_logger(__name__)
 
@@ -89,6 +94,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _OUTPUT_FILENAME: str = "sessions.parquet"
+_IDENTITY_SUFFIX: str = ".identity.json"
 _PARQUET_ENGINE: str = "pyarrow"
 _COMPRESSION: str = "zstd"
 
@@ -288,12 +294,20 @@ class DataProcessor:
         save_to_disk: bool = True,
         output_path: Optional[Path] = None,
         force_refresh: bool = False,
+        identity: Optional[dict] = None,
     ) -> pd.DataFrame:
         """Process validated raw bars into the canonical processed session dataset.
 
+        Cache identity (P1-O3): a cached file is reused only when its sidecar
+        identity exactly matches the requested *identity* (source fingerprint,
+        feed, symbol, timeframe, date bounds, processing version, OR minutes,
+        force-exit time).  Any mismatch, missing/corrupt sidecar, or unreadable
+        Parquet triggers a rebuild — incompatible data can never be reused.
+        Callers without an identity always rebuild (fail-safe).
+
         Steps:
 
-        1. Check cache hit on processed_file if force_refresh=False.
+        1. Acquire the per-key lock; check sidecar identity on cache hit.
         2. Validate required input columns.
         3. Normalise timestamps → ``America/New_York``.
         4. Filter to RTH (09:30–16:00 ET).
@@ -301,7 +315,7 @@ class DataProcessor:
         6. Prune incomplete sessions (OR bar count < ``or_minutes``).
         7. Deduplicate on (session_id, timestamp).
         8. Enforce output column schema and ordering.
-        9. Optionally persist to Parquet with zstd compression.
+        9. Persist atomically (Parquet, then identity sidecar).
 
         Args:
             raw_df: Validated raw bar DataFrame.  Must contain
@@ -311,6 +325,9 @@ class DataProcessor:
             output_path: Override for the Parquet output path.  If ``None``,
                 defaults to ``{processed_dir}/sessions.parquet``.
             force_refresh: When ``True``, ignore existing cached processed file.
+            identity: Dataset identity mapping (see
+                :func:`src.services.artifact_store.dataset_identity`).
+                ``None`` disables cache reads (always rebuilds).
 
         Returns:
             Fully processed DataFrame with the canonical output schema.
@@ -318,30 +335,56 @@ class DataProcessor:
         Raises:
             ValueError: If required input columns are missing.
         """
+        from pathlib import Path as _Path
+
         dest = (
             output_path
             if output_path is not None
             else (self._processed_dir / _OUTPUT_FILENAME)
         )
+        dest = _Path(dest)
+        sidecar = dest.parent / (dest.name + _IDENTITY_SUFFIX)
 
-        # Early return if processed file already exists on disk
-        if not force_refresh and dest.exists():
-            try:
-                cached_df = self.load_processed(dest)
-                if not cached_df.empty:
-                    logger.info(
-                        "Processed session cache hit — loaded %d bars across %d session(s) from %s",
-                        len(cached_df),
-                        cached_df["session_id"].nunique(),
-                        dest,
-                    )
-                    return cached_df
-            except Exception as exc:
-                logger.warning(
-                    "Failed to read existing processed file %s (%s); re-processing.",
-                    dest,
-                    exc,
-                )
+        with cache_key_lock(str(dest.resolve())):
+            return self._process_locked(
+                raw_df, dest, sidecar, save_to_disk, force_refresh, identity
+            )
+
+    def _process_locked(
+        self,
+        raw_df: pd.DataFrame,
+        dest: Path,
+        sidecar: Path,
+        save_to_disk: bool,
+        force_refresh: bool,
+        identity: Optional[dict],
+    ) -> pd.DataFrame:
+        # Cache hit only with an exact identity match on a readable file.
+        if not force_refresh and identity is not None and dest.exists():
+            reason = self._identity_mismatch_reason(sidecar, identity)
+            if reason is None:
+                try:
+                    cached_df = self.load_processed(dest)
+                    if not cached_df.empty:
+                        logger.info(
+                            "Processed session cache hit — loaded %d bars across %d session(s) from %s",
+                            len(cached_df),
+                            cached_df["session_id"].nunique(),
+                            dest,
+                        )
+                        return cached_df
+                    reason = "cached file is empty"
+                except Exception as exc:
+                    reason = f"cached file unreadable ({exc})"
+            logger.info(
+                "Processed cache miss at %s (%s); rebuilding.",
+                dest,
+                reason,
+            )
+        elif force_refresh:
+            logger.info("force_refresh=True — rebuilding processed dataset at %s.", dest)
+        elif identity is None:
+            logger.info("No dataset identity supplied — rebuilding (fail-safe).")
 
         logger.info(
             "DataProcessor: processing %d raw bars | or_minutes=%d | force_exit=%s",
@@ -404,30 +447,52 @@ class DataProcessor:
         # 7. Enforce output schema
         df_out = _enforce_output_schema(df_dedup)
 
-        # 8. Persist
+        # 8. Persist (Parquet first, identity sidecar second: a crash between
+        # the two leaves a mismatching/missing sidecar, which forces a rebuild
+        # instead of a false cache hit).
         if save_to_disk:
             self._save_parquet(df_out, dest)
+            if identity is not None:
+                import json as _json
+
+                atomic_write_text(
+                    sidecar,
+                    _json.dumps(
+                        {"identity": identity,
+                         "rows": len(df_out),
+                         "sessions": sorted(df_out["session_id"].unique().tolist())},
+                        indent=2,
+                        sort_keys=True,
+                    ),
+                )
 
         return df_out
+
+    @staticmethod
+    def _identity_mismatch_reason(sidecar: Path, identity: dict) -> Optional[str]:
+        """None when the sidecar identity exactly matches; else the reason."""
+        import json as _json
+
+        try:
+            stored = _json.loads(sidecar.read_text(encoding="utf-8")).get("identity")
+        except Exception as exc:
+            return f"identity sidecar missing/corrupt ({exc})"
+        if stored != identity:
+            return "identity mismatch (inputs changed)"
+        return None
 
     # ------------------------------------------------------------------
     # Persistence helper
     # ------------------------------------------------------------------
 
     def _save_parquet(self, df: pd.DataFrame, path: Path) -> None:
-        """Persist the processed DataFrame to a zstd-compressed Parquet file.
+        """Persist the processed DataFrame atomically (temp file + replace).
 
         Args:
             df: Processed DataFrame.
             path: Destination path.  Parent directories are created if absent.
         """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(
-            path,
-            engine=_PARQUET_ENGINE,
-            compression=_COMPRESSION,
-            index=False,
-        )
+        atomic_write_parquet(df, path)
         logger.info(
             "Saved %d processed bars → %s (%s, %s engine).",
             len(df),

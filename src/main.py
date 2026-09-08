@@ -17,10 +17,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from src.common.config import load_config
 from src.common.logger import setup_logging, get_logger
 from src.common.exceptions import ORBBaseException
 from src.pipeline import ORBPipeline
+from src.services.run_models import build_run_request
 
 logger = get_logger(__name__)
 
@@ -91,10 +91,17 @@ def parse_args(args=None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--paper",
+        dest="is_paper",
         action="store_true",
-        default=True,
-        help="Use paper trading credentials (default). Negate with --no-paper.",
+        help="Use paper trading credentials.",
     )
+    parser.add_argument(
+        "--no-paper",
+        dest="is_paper",
+        action="store_false",
+        help="Use live trading credentials.",
+    )
+    parser.set_defaults(is_paper=None)
     parser.add_argument(
         "--log-level",
         type=str,
@@ -131,7 +138,28 @@ def _build_overrides_from_args(args: argparse.Namespace) -> Dict[str, Any]:
     if args.feed:
         overrides.setdefault("data", {})["feed"] = args.feed
 
+    # Only forward an explicit paper/live choice; otherwise the YAML value
+    # (or its default) is preserved.
+    if args.is_paper is not None:
+        overrides.setdefault("data", {})["is_paper"] = args.is_paper
+
     return overrides
+
+
+def _build_options_from_args(args: argparse.Namespace) -> Dict[str, Any]:
+    """Convert run-control CLI flags into :func:`build_run_request` options.
+
+    The legacy ``--run-id`` tag is forwarded as the user-facing ``run_label``
+    until P1-O3 manifests split labels from filesystem identities.
+    """
+    return {
+        "start_date": args.start_date,
+        "end_date": args.end_date,
+        "refresh_cache": args.refresh_cache,
+        "generate_plots": not args.no_plots,
+        "run_label": args.run_id,
+        "log_level": args.log_level,
+    }
 
 
 def main(argv=None) -> int:
@@ -150,20 +178,25 @@ def main(argv=None) -> int:
     setup_logging(level=args.log_level)
 
     try:
-        # Build override dict from CLI flags
-        overrides = _build_overrides_from_args(args)
-
-        # Load config — validate_config() is called automatically inside load_config()
-        cfg = load_config(args.config, overrides=overrides)
+        # Shared validation for CLI / dashboard / worker (P1-O2): overrides
+        # and options funnel through one contract; ConfigurationError (an
+        # ORBBaseException) yields exit 1 with a field-specific message.
+        request = build_run_request(
+            config_path=args.config,
+            config_overrides=_build_overrides_from_args(args),
+            options=_build_options_from_args(args),
+        )
+        cfg = request.config
 
         # Execute pipeline
         pipeline = ORBPipeline(config=cfg)
         pipeline.run(
-            start_date=args.start_date,
-            end_date=args.end_date,
-            refresh_cache=args.refresh_cache,
-            generate_plots=not args.no_plots,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            refresh_cache=request.refresh_cache,
+            generate_plots=request.generate_plots,
             run_id=args.run_id,
+            log_level=request.log_level,
         )
         return 0
 
