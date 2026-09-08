@@ -186,18 +186,18 @@ class ORBPipeline:
             raise RuntimeError("No historical bars retrieved. Pipeline aborted.")
         logger.info("Raw bars available: %d", len(raw_df))
 
-        # if generate_plots:
-        #     raw_plotter = CandlestickDataPlotter(
-        #         output_dir=paths.raw_candlestick_plots_dir
-        #     )
-        #     raw_plots = raw_plotter.plot_all_sessions(
-        #         df=raw_df.tail(int(len(raw_df) * 0.2)),
-        #         stage="raw",
-        #         symbol=self.config.strategy.ticker,
-        #         max_plots=20,
-        #     )
-        #     for idx, p in enumerate(raw_plots, 1):
-        #         artifacts[f"raw_candlestick_chart_{idx}"] = p
+        if generate_plots:
+            raw_plotter = CandlestickDataPlotter(
+                output_dir=paths.raw_candlestick_plots_dir
+            )
+            raw_plots = raw_plotter.plot_all_sessions(
+                df=raw_df.tail(int(len(raw_df) * 0.2)),
+                stage="raw",
+                symbol=self.config.strategy.ticker,
+                max_plots=20,
+            )
+            for idx, p in enumerate(raw_plots, 1):
+                artifacts[f"raw_candlestick_chart_{idx}"] = p
 
         # ── Step 2: Data Validation & Cleaning ───────────────────────
         logger.info("[2/6] Validating OHLCV bar integrity and checking for gaps...")
@@ -206,18 +206,18 @@ class ORBPipeline:
         )
         logger.info("Validation complete: %s", report.summary())
 
-        # if generate_plots:
-        #     cleaned_plotter = CandlestickDataPlotter(
-        #         output_dir=paths.cleaned_candlestick_plots_dir
-        #     )
-        #     cleaned_plots = cleaned_plotter.plot_all_sessions(
-        #         df=cleaned_df.tail(int(len(cleaned_df) * 0.2)),
-        #         stage="cleaned",
-        #         symbol=self.config.strategy.ticker,
-        #         max_plots=20,
-        #     )
-        #     for idx, p in enumerate(cleaned_plots, 1):
-        #         artifacts[f"cleaned_candlestick_chart_{idx}"] = p
+        if generate_plots:
+            cleaned_plotter = CandlestickDataPlotter(
+                output_dir=paths.cleaned_candlestick_plots_dir
+            )
+            cleaned_plots = cleaned_plotter.plot_all_sessions(
+                df=cleaned_df.tail(int(len(cleaned_df) * 0.2)),
+                stage="cleaned",
+                symbol=self.config.strategy.ticker,
+                max_plots=20,
+            )
+            for idx, p in enumerate(cleaned_plots, 1):
+                artifacts[f"cleaned_candlestick_chart_{idx}"] = p
 
         # ── Step 3: RTH Session Processing ────────────────────────────
         logger.info(
@@ -239,18 +239,18 @@ class ORBPipeline:
             processed_df["session_id"].nunique(),
         )
 
-        # if generate_plots:
-        #     processed_plotter = CandlestickDataPlotter(
-        #         output_dir=paths.processed_candlestick_plots_dir
-        #     )
-        #     processed_plots = processed_plotter.plot_all_sessions(
-        #         df=processed_df.tail(int(len(processed_df) * 0.2)),
-        #         stage="processed",
-        #         symbol=self.config.strategy.ticker,
-        #         max_plots=20,
-        #     )
-        #     for idx, p in enumerate(processed_plots, 1):
-        #         artifacts[f"processed_candlestick_chart_{idx}"] = p
+        if generate_plots:
+            processed_plotter = CandlestickDataPlotter(
+                output_dir=paths.processed_candlestick_plots_dir
+            )
+            processed_plots = processed_plotter.plot_all_sessions(
+                df=processed_df.tail(int(len(processed_df) * 0.2)),
+                stage="processed",
+                symbol=self.config.strategy.ticker,
+                max_plots=20,
+            )
+            for idx, p in enumerate(processed_plots, 1):
+                artifacts[f"processed_candlestick_chart_{idx}"] = p
 
         # ── Step 4: Event-Driven Backtest Simulation ──────────────────
         logger.info(
@@ -278,19 +278,19 @@ class ORBPipeline:
         artifacts.update(exported)
 
         # ── Visualizations (Portfolio Curves & Trades) ────────────────
-        # if generate_plots:
-        #     logger.info("Generating portfolio performance curves...")
-        #     perf_plots = perf_plotter.generate_all_plots(backtest_result, metrics)
-        #     artifacts.update(perf_plots)
+        if generate_plots:
+            logger.info("Generating portfolio performance curves...")
+            perf_plots = perf_plotter.generate_all_plots(backtest_result, metrics)
+            artifacts.update(perf_plots)
 
-        #     logger.info("Generating session trade candlestick charts...")
-        #     trade_plots = trade_plotter.plot_all_trades(
-        #         trades=backtest_result.trades,
-        #         processed_bars=processed_df,
-        #         max_plots=20,
-        #     )
-        #     for idx, tp in enumerate(trade_plots, 1):
-        #         artifacts[f"trade_chart_{idx}"] = tp
+            logger.info("Generating session trade candlestick charts...")
+            trade_plots = trade_plotter.plot_all_trades(
+                trades=backtest_result.trades,
+                processed_bars=processed_df,
+                max_plots=20,
+            )
+            for idx, tp in enumerate(trade_plots, 1):
+                artifacts[f"trade_chart_{idx}"] = tp
 
         # ── Console summary ───────────────────────────────────────────
         reporter.display_console_summary(metrics)

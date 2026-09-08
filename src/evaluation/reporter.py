@@ -125,6 +125,14 @@ class ResultsReporter:
         pm = metrics.get("portfolio_metrics", {})
         strat = metrics.get("strategy", {})
 
+        def _fmt_ratio(value: Any) -> str:
+            # Metrics use the JSON-safe "inf" string for undefined infinite
+            # ratios (profit_factor, payoff_ratio, sortino, calmar); render it
+            # as-is instead of applying a numeric format spec.
+            if isinstance(value, str):
+                return value
+            return f"{value:.2f}"
+
         print("\n" + "=" * 65)
         print(f"       OPENING RANGE BREAKOUT (ORB) PERFORMANCE REPORT       ")
         print("=" * 65)
@@ -149,7 +157,7 @@ class ResultsReporter:
             f"  Total Realized R:       {tm.get('total_realized_r', 0.0):<8} | Average R / Trade:    {tm.get('avg_r', 0.0):.3f}R"
         )
         print(
-            f"  Mathematical Expectancy:{tm.get('expectancy_r', 0.0):<8} | Payoff Ratio:         {tm.get('payoff_ratio', 0.0):.2f}"
+            f"  Mathematical Expectancy:{tm.get('expectancy_r', 0.0):<8} | Payoff Ratio:         {_fmt_ratio(tm.get('payoff_ratio', 0.0))}"
         )
         print(
             f"  Total Net P&L:          ${tm.get('total_pnl_dollars', 0.0):<8,.2f} | Best / Worst ($):    ${tm.get('best_trade_dollars', 0.0):,.0f} / ${tm.get('worst_trade_dollars', 0.0):,.0f}"

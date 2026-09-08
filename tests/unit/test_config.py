@@ -8,7 +8,7 @@ def test_load_default_config():
     assert isinstance(cfg, AppConfig)
     assert cfg.strategy.ticker == "SPY"
     assert cfg.strategy.opening_range_minutes == 15
-    assert cfg.strategy.target_r == 2.0
+    assert cfg.strategy.target_r == 1.25  # checked-in default (config/default_config.yaml); dataclass fallback is 2.0
     assert cfg.execution.initial_capital == 100_000.0
 
 

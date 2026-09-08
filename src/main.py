@@ -134,13 +134,17 @@ def _build_overrides_from_args(args: argparse.Namespace) -> Dict[str, Any]:
     return overrides
 
 
-def main() -> int:
+def main(argv=None) -> int:
     """Main execution function invoked from the CLI.
+
+    Args:
+        argv: Optional argument list for in-process invocation (testing).
+            ``None`` reads :data:`sys.argv` as usual.
 
     Returns:
         Exit code (0 = success, 1 = error).
     """
-    args = parse_args()
+    args = parse_args(argv)
 
     # Configure centralized logging before anything else
     setup_logging(level=args.log_level)

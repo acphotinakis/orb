@@ -177,6 +177,18 @@ class BacktestEngine:
                 all_trades.append(closed_trade)
                 current_capital += closed_trade.pnl_dollars
                 active_position = None
+                # P1-A4: the fallback close executes after the last per-bar
+                # mark, so record the flattened state explicitly. Without this,
+                # ending equity disagrees with final capital (U1).
+                equity_records.append(
+                    {
+                        "timestamp": pd.Timestamp(last_bar["timestamp"]),
+                        "session_id": session_id_str,
+                        "cash": current_capital,
+                        "position_value": 0.0,
+                        "equity": current_capital,
+                    }
+                )
 
             daily_pnl = current_capital - session_start_capital
             daily_records.append(

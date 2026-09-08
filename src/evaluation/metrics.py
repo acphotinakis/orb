@@ -88,7 +88,15 @@ def calculate_trade_metrics(trades_df: pd.DataFrame) -> Dict[str, Any]:
 
     avg_win_dollars = float(np.mean(wins)) if len(wins) > 0 else 0.0
     avg_loss_dollars = float(abs(np.mean(losses))) if len(losses) > 0 else 0.0
-    payoff_ratio = (avg_win_dollars / avg_loss_dollars) if avg_loss_dollars > 0 else 0.0
+    # Same undefined-ratio convention as profit_factor above: no losing trades
+    # with positive winners is infinite payoff ("inf" keeps strict JSON valid);
+    # no trades at all stays 0.0, matching the empty-frame contract.
+    if avg_loss_dollars > 0:
+        payoff_ratio = avg_win_dollars / avg_loss_dollars
+    elif avg_win_dollars > 0:
+        payoff_ratio = float("inf")
+    else:
+        payoff_ratio = 0.0
 
     best_trade_dollars = float(np.max(pnls)) if len(pnls) > 0 else 0.0
     worst_trade_dollars = float(np.min(pnls)) if len(pnls) > 0 else 0.0
@@ -121,7 +129,9 @@ def calculate_trade_metrics(trades_df: pd.DataFrame) -> Dict[str, Any]:
         "expectancy_r": round(expectancy_r, 4),
         "avg_win_dollars": round(avg_win_dollars, 2),
         "avg_loss_dollars": round(avg_loss_dollars, 2),
-        "payoff_ratio": round(payoff_ratio, 4),
+        "payoff_ratio": (
+            round(payoff_ratio, 4) if not math.isinf(payoff_ratio) else "inf"
+        ),
         "best_trade_dollars": round(best_trade_dollars, 2),
         "worst_trade_dollars": round(worst_trade_dollars, 2),
         "best_trade_r": round(best_trade_r, 4),

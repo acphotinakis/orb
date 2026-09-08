@@ -15,7 +15,14 @@ from src.evaluation.metrics import (
     calculate_portfolio_metrics,
     generate_performance_report
 )
-from src.common.config import AppConfig
+from src.common.config import (
+    AppConfig,
+    StrategyConfig,
+    FiltersConfig,
+    DataConfig,
+    ExecutionConfig,
+    OutputConfig,
+)
 
 
 def test_calculate_trade_metrics_empty_dataframe():
@@ -64,7 +71,9 @@ def test_calculate_trade_metrics_all_wins():
         "direction": ["LONG", "SHORT", "LONG"],
         "pnl_dollars": [100.0, 200.0, 150.0],
         "r_multiple": [2.0, 3.0, 2.5],
-        "exit_reason": ["TARGET", "TARGET", "STOP"]
+        "exit_reason": ["TARGET", "TARGET", "STOP"],
+        "slippage_paid": [0.0, 0.0, 0.0],
+        "commission_paid": [0.0, 0.0, 0.0],
     })
 
     result = calculate_trade_metrics(trades_df)
@@ -74,14 +83,14 @@ def test_calculate_trade_metrics_all_wins():
     assert result["loss_count"] == 0
     assert result["scratch_count"] == 0
     assert result["win_rate"] == 1.0
-    assert result["profit_factor"] == float("inf")
+    assert result["profit_factor"] == "inf"  # JSON-safe infinite (no losses)
     assert result["total_realized_r"] == 7.5
     assert result["avg_r"] == 2.5
     assert result["median_r"] == 2.5
     assert result["expectancy_r"] == 2.5
     assert result["avg_win_dollars"] == 150.0
     assert result["avg_loss_dollars"] == 0.0
-    assert result["payoff_ratio"] == float("inf")
+    assert result["payoff_ratio"] == "inf"  # no losing trades
     assert result["best_trade_dollars"] == 200.0
     assert result["worst_trade_dollars"] == 100.0
     assert result["best_trade_r"] == 3.0
@@ -97,7 +106,9 @@ def test_calculate_trade_metrics_all_losses():
         "direction": ["LONG", "SHORT", "LONG"],
         "pnl_dollars": [-100.0, -200.0, -150.0],
         "r_multiple": [-2.0, -3.0, -2.5],
-        "exit_reason": ["STOP", "STOP", "EOD"]
+        "exit_reason": ["STOP", "STOP", "EOD"],
+        "slippage_paid": [0.0, 0.0, 0.0],
+        "commission_paid": [0.0, 0.0, 0.0],
     })
 
     result = calculate_trade_metrics(trades_df)
@@ -130,7 +141,9 @@ def test_calculate_trade_metrics_mixed():
         "direction": ["LONG", "SHORT", "LONG", "SHORT"],
         "pnl_dollars": [100.0, -50.0, 200.0, -100.0],
         "r_multiple": [2.0, -1.0, 4.0, -2.0],
-        "exit_reason": ["TARGET", "STOP", "TARGET", "EOD"]
+        "exit_reason": ["TARGET", "STOP", "TARGET", "EOD"],
+        "slippage_paid": [0.0, 0.0, 0.0, 0.0],
+        "commission_paid": [0.0, 0.0, 0.0, 0.0],
     })
 
     result = calculate_trade_metrics(trades_df)
@@ -143,8 +156,8 @@ def test_calculate_trade_metrics_mixed():
     assert result["profit_factor"] == 2.0  # (100 + 200) / (50 + 100) = 300 / 150 = 2.0
     assert result["total_realized_r"] == 3.0
     assert result["avg_r"] == 0.75
-    assert result["median_r"] == 1.5
-    assert result["expectancy_r"] == 0.5  # (0.5 * 3.0) - (0.5 * 1.5) = 1.5 - 0.75 = 0.75
+    assert result["median_r"] == 0.5  # median(-2, -1, 2, 4) = (-1 + 2) / 2
+    assert result["expectancy_r"] == 0.75  # (0.5 * 3.0) - (0.5 * 1.5) = 1.5 - 0.75 = 0.75
     assert result["avg_win_dollars"] == 150.0
     assert result["avg_loss_dollars"] == 75.0
     assert result["payoff_ratio"] == 2.0
@@ -164,7 +177,9 @@ def test_calculate_trade_metrics_scratch_trades():
         "direction": ["LONG", "SHORT", "LONG", "SHORT"],
         "pnl_dollars": [100.0, 0.0, 200.0, -100.0],
         "r_multiple": [2.0, 0.0, 4.0, -2.0],
-        "exit_reason": ["TARGET", "STOP", "TARGET", "EOD"]
+        "exit_reason": ["TARGET", "STOP", "TARGET", "EOD"],
+        "slippage_paid": [0.0, 0.0, 0.0, 0.0],
+        "commission_paid": [0.0, 0.0, 0.0, 0.0],
     })
 
     result = calculate_trade_metrics(trades_df)
@@ -174,11 +189,11 @@ def test_calculate_trade_metrics_scratch_trades():
     assert result["loss_count"] == 1
     assert result["scratch_count"] == 1
     assert result["win_rate"] == 0.5
-    assert result["profit_factor"] == 2.0  # (100 + 200) / (100) = 300 / 100 = 3.0
+    assert result["profit_factor"] == 3.0  # (100 + 200) / (100) = 300 / 100 = 3.0
     assert result["total_realized_r"] == 4.0
     assert result["avg_r"] == 1.0
-    assert result["median_r"] == 2.0
-    assert result["expectancy_r"] == 1.0  # (0.5 * 3.0) - (0.25 * 2.0) = 1.5 - 0.5 = 1.0
+    assert result["median_r"] == 1.0  # median(-2, 0, 2, 4) = (0 + 2) / 2
+    assert result["expectancy_r"] == 0.5  # E_R = W*avg_win - (1-W)*avg_loss = 0.5*3.0 - 0.5*2.0
     assert result["avg_win_dollars"] == 150.0
     assert result["avg_loss_dollars"] == 100.0
     assert result["payoff_ratio"] == 1.5
@@ -248,9 +263,10 @@ def test_calculate_portfolio_metrics_with_drawdown():
     assert result["initial_capital"] == 100000.0
     assert result["ending_equity"] == 100000.0
     assert result["total_return_pct"] == 0.0
-    assert result["max_drawdown_pct"] == 10.0
-    assert result["max_drawdown_dollars"] == 10000.0
-    assert result["max_drawdown_duration_bars"] == 2  # Duration between peak and trough
+    # Running-peak definition: peak 120k (idx2) -> trough 90k (idx5).
+    assert result["max_drawdown_pct"] == 25.0
+    assert result["max_drawdown_dollars"] == 30000.0
+    assert result["max_drawdown_duration_bars"] == 4  # dd > 0 on idx3..idx6
 
 
 def test_calculate_portfolio_metrics_with_cagr():
@@ -274,7 +290,9 @@ def test_generate_performance_report():
         "direction": ["LONG", "SHORT", "LONG"],
         "pnl_dollars": [100.0, -50.0, 200.0],
         "r_multiple": [2.0, -1.0, 4.0],
-        "exit_reason": ["TARGET", "STOP", "TARGET"]
+        "exit_reason": ["TARGET", "STOP", "TARGET"],
+        "slippage_paid": [0.0, 0.0, 0.0],
+        "commission_paid": [0.0, 0.0, 0.0],
     })
 
     equity_df = pd.DataFrame({
@@ -282,13 +300,17 @@ def test_generate_performance_report():
     })
 
     config = AppConfig(
-        execution={"initial_capital": 100000.0},
-        strategy={
-            "ticker": "SPY",
-            "opening_range_minutes": 30,
-            "target_r": 2.0,
-            "max_trades_per_day": 5
-        }
+        schema_version="1.0",
+        strategy=StrategyConfig(
+            ticker="SPY",
+            opening_range_minutes=30,
+            target_r=2.0,
+            max_trades_per_day=5,
+        ),
+        filters=FiltersConfig(),
+        data=DataConfig(),
+        execution=ExecutionConfig(initial_capital=100000.0),
+        output=OutputConfig(),
     )
 
     result = generate_performance_report(trades_df, equity_df, config)
