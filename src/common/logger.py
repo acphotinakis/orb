@@ -47,7 +47,6 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -87,7 +86,7 @@ _VALID_LEVELS: frozenset[str] = frozenset(
 
 def setup_logging(
     level: str = "INFO",
-    log_file: Optional[Path] = None,
+    log_file: Path | None = None,
 ) -> logging.Logger:
     """Configure the ORB root logger with console (and optional file) output.
 
@@ -183,7 +182,7 @@ def get_logger(name: str) -> logging.Logger:
 
         # In src/data/fetcher.py
         from src.common.logger import get_logger
-        logger = get_logger(__name__)   # → "orb.data.fetcher" (if __name__ starts with src)
+        logger = get_logger(__name__)  # → "orb.data.fetcher"
         logger.info("Fetching bars for %s", ticker)
     """
     # Normalise the name so callers can pass __name__ (which starts with "src")

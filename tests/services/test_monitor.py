@@ -7,31 +7,23 @@ All tests are offline and credential-free.
 
 from __future__ import annotations
 
-from dataclasses import replace
-from typing import List
-
 import pandas as pd
-import pytest
 
-from src.data.live_stream import FakeStreamAdapter, RawBar, StreamEvent, make_fake_bars
+from src.data.live_stream import FakeStreamAdapter, RawBar, make_fake_bars
 from src.services.monitor_state import (
-    MonitorState,
     MonitorSignal,
+    MonitorState,
     SessionConfig,
     end_session,
     mark_degraded,
     new_session,
     on_bar,
-    snapshot,
 )
 from src.services.stream_collector import (
-    BarStore,
     CollectorState,
     FinalizationPolicy,
     StreamCollector,
-    expected_bars_between,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -48,7 +40,7 @@ def _clock() -> pd.Timestamp:
 
 
 def _make_collector(
-    bars: List[RawBar],
+    bars: list[RawBar],
     *,
     session_id: str = SESSION_ID,
     policy: FinalizationPolicy = FinalizationPolicy(),
@@ -82,6 +74,7 @@ def _drain(collector: StreamCollector, max_events: int = 10_000) -> CollectorSta
 # P5-T01: FakeStreamAdapter emits connected then bars in order
 # ===========================================================================
 
+
 def test_fake_stream_emits_connected_then_bars():
     """FakeStreamAdapter with 3 bars emits connected -> bar -> bar -> bar."""
     bars = make_fake_bars(SESSION_ID, total_bars=3)
@@ -100,6 +93,7 @@ def test_fake_stream_emits_connected_then_bars():
 # P5-T02: Duplicate bars emitted twice
 # ===========================================================================
 
+
 def test_fake_stream_duplicate_bars_emitted_twice():
     """duplicate_indices={1} causes bar at index 1 to be emitted twice."""
     bars = make_fake_bars(SESSION_ID, total_bars=3)
@@ -115,6 +109,7 @@ def test_fake_stream_duplicate_bars_emitted_twice():
 # P5-T03: Drop indices reduce emitted bars
 # ===========================================================================
 
+
 def test_fake_stream_drop_emits_fewer_bars():
     """drop_indices={2} means only 2 bars in events (bar at index 2 is skipped)."""
     bars = make_fake_bars(SESSION_ID, total_bars=3)
@@ -127,6 +122,7 @@ def test_fake_stream_drop_emits_fewer_bars():
 # ===========================================================================
 # P5-T04: Disconnect then reconnect
 # ===========================================================================
+
 
 def test_fake_stream_disconnect_reconnect():
     """disconnect_after=2 emits: connected, bar, bar, disconnected, connected, bar."""
@@ -148,6 +144,7 @@ def test_fake_stream_disconnect_reconnect():
 # P5-T05: stop() causes events() to raise StopIteration
 # ===========================================================================
 
+
 def test_fake_stream_stop_raises():
     """After stop(), events() iterator yields nothing (StopIteration immediately)."""
     bars = make_fake_bars(SESSION_ID, total_bars=5)
@@ -162,8 +159,11 @@ def test_fake_stream_stop_raises():
 # P5-T06: Heartbeat does not update last_bar_market_ts
 # ===========================================================================
 
+
 def test_heartbeat_does_not_update_bar_ts():
-    """Heartbeat event updates last_heartbeat_at but NOT collector last_bar_market_ts."""
+    """Heartbeat event updates last_heartbeat_at but NOT
+    collector last_bar_market_ts.
+    """
     # Use heartbeat_every=1 so every bar is followed by a heartbeat
     bars = make_fake_bars(SESSION_ID, total_bars=35)
     collector = _make_collector(bars, heartbeat_every=1)
@@ -178,6 +178,7 @@ def test_heartbeat_does_not_update_bar_ts():
 # ===========================================================================
 # P5-T07: OR formation accumulates over 15 bars
 # ===========================================================================
+
 
 def test_on_bar_or_formation_accumulates():
     """15 OR bars accumulate; or_frozen becomes True after the 15th is processed."""
@@ -199,6 +200,7 @@ def test_on_bar_or_formation_accumulates():
 # P5-T08: No signal generated during OR window
 # ===========================================================================
 
+
 def test_on_bar_no_signal_during_or():
     """Signals are not generated for bars within the OR window (minute_of_day < 15)."""
     # Make all 15 OR bars have extreme closes to ensure they would trigger a signal
@@ -213,6 +215,7 @@ def test_on_bar_no_signal_during_or():
 # ===========================================================================
 # P5-T09: Breakout bar generates MonitorSignal
 # ===========================================================================
+
 
 def test_on_bar_breakout_generates_signal():
     """A bar with close > or_high+0.1 in trading window generates a MonitorSignal."""
@@ -242,6 +245,7 @@ def test_on_bar_breakout_generates_signal():
 # P5-T10: Degraded state suppresses signals
 # ===========================================================================
 
+
 def test_on_bar_no_signal_when_degraded():
     """mark_degraded state suppresses new signals even on a breakout bar."""
     bars = make_fake_bars(
@@ -268,6 +272,7 @@ def test_on_bar_no_signal_when_degraded():
 # P5-T11: Force-exit closes open simulated position
 # ===========================================================================
 
+
 def test_on_bar_force_exit_closes_open_signal():
     """A bar at 15:59 ET closes any open simulated position."""
     # Build a short session: OR + breakout + force-exit bar
@@ -291,8 +296,11 @@ def test_on_bar_force_exit_closes_open_signal():
 # P5-T12: Collector deduplication
 # ===========================================================================
 
+
 def test_collector_deduplication():
-    """Same (symbol,feed,timeframe,bar_start,revision) inserted twice -> bars_dropped_dup=1."""
+    """Same (symbol,feed,timeframe,bar_start,revision) inserted twice
+    -> bars_dropped_dup=1.
+    """
     bars = make_fake_bars(SESSION_ID, total_bars=3)
     # Duplicate bar at index 0
     collector = _make_collector(bars, duplicate_indices={0})
@@ -304,8 +312,11 @@ def test_collector_deduplication():
 # P5-T13: Full session through collector
 # ===========================================================================
 
+
 def test_collector_run_one_full_session():
-    """Run collector through a fake session; final state has or_frozen and correct counts."""
+    """Run collector through a fake session; final state has or_frozen
+    and correct counts.
+    """
     bars = make_fake_bars(
         SESSION_ID,
         or_minutes=15,
@@ -331,6 +342,7 @@ def test_collector_run_one_full_session():
 # P5-T14: stop() returns False from run_one and sets stopped
 # ===========================================================================
 
+
 def test_collector_stop():
     """After stop(), run_one() returns False and state.stopped=True."""
     bars = make_fake_bars(SESSION_ID, total_bars=5)
@@ -344,6 +356,7 @@ def test_collector_stop():
 # ===========================================================================
 # P5-T15: Batch/stream parity with evaluate_bar_signal
 # ===========================================================================
+
 
 def test_batch_stream_parity():
     """on_bar() chain agrees with evaluate_bar_signal called directly on same bars.
@@ -395,7 +408,9 @@ def test_batch_stream_parity():
     assert ref_sig.direction == "LONG"
 
     # The monitor state must have captured an equivalent signal
-    sig = state.open_signal or (state.closed_signals[0] if state.closed_signals else None)
+    sig = state.open_signal or (
+        state.closed_signals[0] if state.closed_signals else None
+    )
     assert sig is not None
     assert sig.direction == ref_sig.direction
     assert abs(sig.entry_price - ref_sig.entry_price) < 1e-9
@@ -407,6 +422,7 @@ def test_batch_stream_parity():
 # P5-T16: Stale detection via fake clock
 # ===========================================================================
 
+
 def test_stale_detection():
     """After stale_threshold_seconds with no bar, collector.state.stale == True."""
     bars = make_fake_bars(SESSION_ID, total_bars=2)
@@ -414,7 +430,8 @@ def test_stale_detection():
     policy = FinalizationPolicy(stale_threshold_seconds=stale_threshold)
 
     # Clock that starts at T0 for setup+events then jumps ahead past stale threshold.
-    # 5 T0 slots: 1 (collector init) + 1 (connected) + 1 (bar[0]) + 1 (bar[1]) + 1 spare.
+    # 5 T0 slots: 1 (collector init) + 1 (connected) + 1 (bar[0]) + 1 (bar[1])
+    # + 1 spare.
     t0 = pd.Timestamp("2024-01-02 14:30:00", tz="UTC")
     future_time = pd.Timestamp("2024-01-02 14:32:00", tz="UTC")  # 120s > 30s threshold
     clock_calls = iter([t0] * 5 + [future_time] * 1000)
@@ -451,6 +468,7 @@ def test_stale_detection():
 # P5-T17: Gap detection marks degraded
 # ===========================================================================
 
+
 def test_gap_detection_marks_degraded():
     """Injecting a gap > max_gap_bars triggers degraded state."""
     # Build bars with a big gap (drop indices 16-22, i.e., 7 bars)
@@ -467,6 +485,7 @@ def test_gap_detection_marks_degraded():
 # ===========================================================================
 # P5-T18: end_session clears open simulated position
 # ===========================================================================
+
 
 def test_end_session_clears_open_signal():
     """end_session() closes any open simulated position."""
@@ -504,13 +523,16 @@ def test_end_session_clears_open_signal():
 # P5-T11 / P5-A6: Burst ingestion at 10x rate and bounded memory
 # ===========================================================================
 
+
 def test_burst_ingestion_10x_rate():
     """P5-A6: 60-minute burst at 10x expected rate (600 bars).
 
     Verifies configured buffers stay bounded, persisted accepted bars reconcile
     exactly with input counts (600 in, 600 finalized), and no unreported loss occurs.
     """
-    bars = make_fake_bars(SESSION_ID, total_bars=600, breakout_bar=20, breakout_direction="LONG")
+    bars = make_fake_bars(
+        SESSION_ID, total_bars=600, breakout_bar=20, breakout_direction="LONG"
+    )
     adapter = FakeStreamAdapter(bars)
     collector = StreamCollector(adapter, "SPY", "sip", "1Min", DEFAULT_CFG)
     collector._session_id = SESSION_ID
@@ -526,4 +548,3 @@ def test_burst_ingestion_10x_rate():
     assert state.gaps_detected == 0
     assert state.monitor_state is not None
     assert state.monitor_state.or_frozen is True
-

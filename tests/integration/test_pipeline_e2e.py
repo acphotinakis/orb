@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-import pandas as pd
-import numpy as np
 
-from src.pipeline import ORBPipeline, PipelineRunResult
+import numpy as np
+import pandas as pd
+
 from src.common.config import load_config
+from src.pipeline import ORBPipeline, PipelineRunResult
 
 
 def test_pipeline_e2e_execution(tmp_path: Path):
-    """Runs full ORBPipeline on multi-day synthetic cached data and asserts all outputs."""
+    """Runs full ORBPipeline on multi-day synthetic cached data and
+    asserts all outputs.
+    """
     # 1. Setup isolated directories in tmp_path following PathManager layout
     # data/raw/{symbol}/{feed}/{timeframe}/
     raw_dir = tmp_path / "data" / "raw" / "SPY" / "sip" / "1Min"
@@ -27,7 +30,9 @@ def test_pipeline_e2e_execution(tmp_path: Path):
     dates = ["2024-01-02", "2024-01-03", "2024-01-04"]
     all_bars = []
     for d in dates:
-        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert("UTC")
+        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert(
+            "UTC"
+        )
         ts = pd.date_range(start=open_utc, periods=391, freq="1min")
         n = len(ts)
         opens = np.full(n, 500.0)
@@ -60,19 +65,23 @@ def test_pipeline_e2e_execution(tmp_path: Path):
             highs[17:391] = 502.0
             lows[17:391] = 501.0
 
-        df_day = pd.DataFrame({
-            "timestamp": ts,
-            "open": opens,
-            "high": highs,
-            "low": lows,
-            "close": closes,
-            "volume": volumes,
-        })
+        df_day = pd.DataFrame(
+            {
+                "timestamp": ts,
+                "open": opens,
+                "high": highs,
+                "low": lows,
+                "close": closes,
+                "volume": volumes,
+            }
+        )
         all_bars.append(df_day)
 
     raw_combined = pd.concat(all_bars, ignore_index=True)
     cache_file = raw_dir / "SPY_1Min_20240102_20240104.parquet"
-    raw_combined.to_parquet(cache_file, engine="pyarrow", compression="zstd", index=False)
+    raw_combined.to_parquet(
+        cache_file, engine="pyarrow", compression="zstd", index=False
+    )
 
     # 3. Configure and run pipeline using tmp_path as root base_dir
     base_cfg = load_config("config/default_config.yaml")
@@ -131,7 +140,9 @@ def test_cli_offline_success_with_injected_source(tmp_path: Path, monkeypatch):
     dates = ["2024-01-02", "2024-01-03"]
     all_bars = []
     for d in dates:
-        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert("UTC")
+        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert(
+            "UTC"
+        )
         ts = pd.date_range(start=open_utc, periods=391, freq="1min")
         n = len(ts)
         opens = np.full(n, 500.0)
@@ -146,10 +157,18 @@ def test_cli_offline_success_with_injected_source(tmp_path: Path, monkeypatch):
             highs[16] = 501.6
             closes[25] = 506.6
             highs[25] = 507.0
-        all_bars.append(pd.DataFrame({
-            "timestamp": ts, "open": opens, "high": highs, "low": lows,
-            "close": closes, "volume": volumes,
-        }))
+        all_bars.append(
+            pd.DataFrame(
+                {
+                    "timestamp": ts,
+                    "open": opens,
+                    "high": highs,
+                    "low": lows,
+                    "close": closes,
+                    "volume": volumes,
+                }
+            )
+        )
     injected = pd.concat(all_bars, ignore_index=True)
 
     class _InjectedFetcher:
@@ -163,17 +182,27 @@ def test_cli_offline_success_with_injected_source(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     # Resolve repo config before chdir takes effect
     repo_root = Path(__file__).resolve().parents[2]
-    shutil.copy(repo_root / "config" / "default_config.yaml", tmp_path / "test_config.yaml")
+    shutil.copy(
+        repo_root / "config" / "default_config.yaml", tmp_path / "test_config.yaml"
+    )
 
-    rc = main([
-        "--config", str(tmp_path / "test_config.yaml"),
-        "--run-id", "cli_offline_run",
-        "--timeframe", "1Min",
-        "--start-date", "2024-01-02",
-        "--end-date", "2024-01-03",
-        "--no-plots",
-        "--log-level", "WARNING",
-    ])
+    rc = main(
+        [
+            "--config",
+            str(tmp_path / "test_config.yaml"),
+            "--run-id",
+            "cli_offline_run",
+            "--timeframe",
+            "1Min",
+            "--start-date",
+            "2024-01-02",
+            "--end-date",
+            "2024-01-03",
+            "--no-plots",
+            "--log-level",
+            "WARNING",
+        ]
+    )
     assert rc == 0
 
     exp_dir = tmp_path / "experiments" / "cli_offline_run__SPY_1Min_20240102_20240103"
@@ -185,7 +214,9 @@ def test_cli_offline_success_with_injected_source(tmp_path: Path, monkeypatch):
 
 
 def test_cli_missing_config_returns_error(tmp_path: Path, monkeypatch):
-    """Explicit failure: nonexistent config file exits nonzero without traceback leak."""
+    """Explicit failure: nonexistent config file exits nonzero without
+    traceback leak.
+    """
     from src.main import main
 
     monkeypatch.chdir(tmp_path)
@@ -201,11 +232,18 @@ def test_cli_invalid_timeframe_returns_error(tmp_path: Path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     repo_root = Path(__file__).resolve().parents[2]
-    shutil.copy(repo_root / "config" / "default_config.yaml", tmp_path / "test_config.yaml")
-    rc = main([
-        "--config", str(tmp_path / "test_config.yaml"),
-        "--timeframe", "BogusTF",
-        "--no-plots",
-        "--log-level", "WARNING",
-    ])
+    shutil.copy(
+        repo_root / "config" / "default_config.yaml", tmp_path / "test_config.yaml"
+    )
+    rc = main(
+        [
+            "--config",
+            str(tmp_path / "test_config.yaml"),
+            "--timeframe",
+            "BogusTF",
+            "--no-plots",
+            "--log-level",
+            "WARNING",
+        ]
+    )
     assert rc == 1

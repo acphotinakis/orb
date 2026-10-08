@@ -27,7 +27,7 @@ from __future__ import annotations
 import sys
 import traceback
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from src.common.exceptions import CancelledRun, ORBBaseException
 from src.common.logger import get_logger
@@ -58,9 +58,9 @@ def run_worker(storage_root: str | Path, run_id: str) -> int:
     import json as _json
 
     config = app_config_from_dict(_json.loads(row["config_json"]))
-    options: Dict[str, Any] = _json.loads(row["options_json"])
+    options: dict[str, Any] = _json.loads(row["options_json"])
 
-    def _on_event(event: Dict[str, Any]) -> None:
+    def _on_event(event: dict[str, Any]) -> None:
         try:
             registry.append_event(run_id, event)
         except (KeyError, ValueError) as exc:
@@ -116,8 +116,10 @@ def run_worker(storage_root: str | Path, run_id: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if len(args) != 2:
-        print("usage: python -m src.services.worker <storage_root> <run_id>",
-              file=sys.stderr)
+        print(
+            "usage: python -m src.services.worker <storage_root> <run_id>",
+            file=sys.stderr,
+        )
         return 2
     return run_worker(args[0], args[1])
 

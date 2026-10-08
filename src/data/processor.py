@@ -19,7 +19,8 @@ Processing Pipeline
 4. **Incomplete session pruning** — drop sessions where the opening range
    (09:30–09:44) contains fewer than the configured ``opening_range_minutes``
    bars (default 15).
-5. **Persist** — write to ``data/processed/{symbol}/{timeframe}_{date_slug}/sessions.parquet``
+5. **Persist** — write to
+   ``data/processed/{symbol}/{timeframe}_{date_slug}/sessions.parquet``
    with Zstandard (zstd) compression.
 
 Output Schema
@@ -66,20 +67,18 @@ Usage
 
 from __future__ import annotations
 
-import datetime
 from pathlib import Path
-from typing import Optional
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from src.common.config import AppConfig
 from src.common.logger import get_logger
 from src.common.time_utils import (
     EASTERN_TZ,
     filter_rth,
-    to_eastern,
     get_timeframe_minutes,
+    to_eastern,
 )
 from src.services.artifact_store import (
     atomic_write_parquet,
@@ -145,7 +144,8 @@ def _add_session_metadata(
     * ``session_id``: ``YYYY-MM-DD`` string derived from bar timestamp.
     * ``minute_of_day``: Integer minutes since 09:30:00 open.
     * ``is_opening_range``: ``True`` for bars in ``[09:30, 09:30 + or_minutes)``.
-    * ``is_trading_window``: ``True`` for bars in ``[09:30 + or_minutes, force_exit_time)``.
+    * ``is_trading_window``: ``True`` for bars in
+      ``[09:30 + or_minutes, force_exit_time)``.
     * ``is_force_exit``: ``True`` for bars at or after ``force_exit_time``.
 
     Args:
@@ -208,7 +208,8 @@ def _prune_incomplete_sessions(
     n_pruned = df["session_id"].nunique() - len(complete_sessions)
     if n_pruned > 0:
         logger.warning(
-            "Pruned %d session(s) with incomplete opening ranges (< %d bars for %d-min OR at %d-min timeframe).",
+            "Pruned %d session(s) with incomplete opening ranges "
+            "(< %d bars for %d-min OR at %d-min timeframe).",
             n_pruned,
             expected_bars,
             or_minutes,
@@ -292,9 +293,9 @@ class DataProcessor:
         self,
         raw_df: pd.DataFrame,
         save_to_disk: bool = True,
-        output_path: Optional[Path] = None,
+        output_path: Path | None = None,
         force_refresh: bool = False,
-        identity: Optional[dict] = None,
+        identity: dict | None = None,
     ) -> pd.DataFrame:
         """Process validated raw bars into the canonical processed session dataset.
 
@@ -357,7 +358,7 @@ class DataProcessor:
         sidecar: Path,
         save_to_disk: bool,
         force_refresh: bool,
-        identity: Optional[dict],
+        identity: dict | None,
     ) -> pd.DataFrame:
         # Cache hit only with an exact identity match on a readable file.
         if not force_refresh and identity is not None and dest.exists():
@@ -367,7 +368,8 @@ class DataProcessor:
                     cached_df = self.load_processed(dest)
                     if not cached_df.empty:
                         logger.info(
-                            "Processed session cache hit — loaded %d bars across %d session(s) from %s",
+                            "Processed session cache hit — loaded %d bars "
+                            "across %d session(s) from %s",
                             len(cached_df),
                             cached_df["session_id"].nunique(),
                             dest,
@@ -382,7 +384,9 @@ class DataProcessor:
                 reason,
             )
         elif force_refresh:
-            logger.info("force_refresh=True — rebuilding processed dataset at %s.", dest)
+            logger.info(
+                "force_refresh=True — rebuilding processed dataset at %s.", dest
+            )
         elif identity is None:
             logger.info("No dataset identity supplied — rebuilding (fail-safe).")
 
@@ -458,9 +462,11 @@ class DataProcessor:
                 atomic_write_text(
                     sidecar,
                     _json.dumps(
-                        {"identity": identity,
-                         "rows": len(df_out),
-                         "sessions": sorted(df_out["session_id"].unique().tolist())},
+                        {
+                            "identity": identity,
+                            "rows": len(df_out),
+                            "sessions": sorted(df_out["session_id"].unique().tolist()),
+                        },
                         indent=2,
                         sort_keys=True,
                     ),
@@ -469,7 +475,7 @@ class DataProcessor:
         return df_out
 
     @staticmethod
-    def _identity_mismatch_reason(sidecar: Path, identity: dict) -> Optional[str]:
+    def _identity_mismatch_reason(sidecar: Path, identity: dict) -> str | None:
         """None when the sidecar identity exactly matches; else the reason."""
         import json as _json
 
@@ -505,7 +511,7 @@ class DataProcessor:
     # Convenience: load processed dataset from disk
     # ------------------------------------------------------------------
 
-    def load_processed(self, path: Optional[Path] = None) -> pd.DataFrame:
+    def load_processed(self, path: Path | None = None) -> pd.DataFrame:
         """Load the processed sessions Parquet file from disk.
 
         Args:

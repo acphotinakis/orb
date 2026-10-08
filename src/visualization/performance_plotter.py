@@ -13,17 +13,18 @@ Generates high-resolution PNG charts:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Any
+
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
-from src.backtest.engine import BacktestResult
-from src.common.logger import get_logger
-from src.common.time_utils import to_eastern, ensure_eastern, EASTERN_TZ
+from src.backtest.engine import BacktestResult  # noqa: E402
+from src.common.logger import get_logger  # noqa: E402
+from src.common.time_utils import to_eastern  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -33,10 +34,10 @@ class PerformancePlotter:
 
     def __init__(
         self,
-        plots_base_dir: Optional[Union[str, Path]] = None,
-        equity_dir: Optional[Path] = None,
-        drawdown_dir: Optional[Path] = None,
-        distributions_dir: Optional[Path] = None,
+        plots_base_dir: str | Path | None = None,
+        equity_dir: Path | None = None,
+        drawdown_dir: Path | None = None,
+        distributions_dir: Path | None = None,
     ) -> None:
         """Initialise the PerformancePlotter.
 
@@ -67,7 +68,7 @@ class PerformancePlotter:
     def plot_equity_curve(
         self,
         equity_df: pd.DataFrame,
-        metrics: Dict[str, Any],
+        metrics: dict[str, Any],
         filename: str = "equity_curve.png",
     ) -> Path:
         """Plots cumulative equity curve with key metrics summary callout."""
@@ -335,10 +336,10 @@ class PerformancePlotter:
     def generate_all_plots(
         self,
         backtest_result: BacktestResult,
-        metrics: Dict[str, Any],
-    ) -> Dict[str, Path]:
+        metrics: dict[str, Any],
+    ) -> dict[str, Path]:
         """Generates all 4 portfolio performance visual charts."""
-        paths: Dict[str, Path] = {}
+        paths: dict[str, Path] = {}
         paths["equity_curve"] = self.plot_equity_curve(
             backtest_result.equity_curve, metrics
         )

@@ -20,7 +20,7 @@ availability instant).
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 TRACE_SCHEMA_VERSION = 1
 
@@ -29,7 +29,7 @@ RULE_BREAKOUT_CLOSE = "orb_breakout_close"
 RULE_FLATTEN = "session_flatten"
 RULE_EXIT_BRACKET = "exit_bracket"
 
-RULE_SOURCE_MAP: Dict[str, Dict[str, str]] = {
+RULE_SOURCE_MAP: dict[str, dict[str, str]] = {
     RULE_BREAKOUT_CLOSE: {
         "module": "src/strategy/signals.py",
         "function": "evaluate_bar_signal",
@@ -66,14 +66,14 @@ class TraceCollector:
         if max_events < 1:
             raise ValueError("max_events must be positive")
         self.max_events = max_events
-        self.events: List[Dict[str, Any]] = []
+        self.events: list[dict[str, Any]] = []
         self.truncated = False
 
     @property
     def full(self) -> bool:
         return len(self.events) >= self.max_events
 
-    def record(self, event_type: str, **fields: Any) -> Optional[int]:
+    def record(self, event_type: str, **fields: Any) -> int | None:
         """Append one event; returns its seq, or None when the cap is hit."""
         if self.full:
             self.truncated = True
@@ -90,7 +90,7 @@ class TraceCollector:
         )
         return seq
 
-    def header(self, **fields: Any) -> Dict[str, Any]:
+    def header(self, **fields: Any) -> dict[str, Any]:
         """Header record describing this trace (written first on export)."""
         return {
             "trace_version": TRACE_SCHEMA_VERSION,
@@ -110,7 +110,7 @@ class TraceCollector:
         return "\n".join(lines) + "\n"
 
     @staticmethod
-    def parse_jsonl(payload: str) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    def parse_jsonl(payload: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Parse a trace file; raises ValueError on unknown versions.
 
         Returns ``(header, events)``.  Unknown ``trace_version`` values fail
@@ -134,8 +134,12 @@ class TraceCollector:
             raise ValueError("Trace event count mismatch; file is incomplete.")
         previous = None
         import pandas as pd
+
         for index, event in enumerate(events):
-            if not isinstance(event, dict) or event.get("trace_version") != TRACE_SCHEMA_VERSION:
+            if (
+                not isinstance(event, dict)
+                or event.get("trace_version") != TRACE_SCHEMA_VERSION
+            ):
                 raise ValueError("Unsupported trace event version.")
             if event.get("seq") != index:
                 raise ValueError("Trace sequence is missing or out of order.")

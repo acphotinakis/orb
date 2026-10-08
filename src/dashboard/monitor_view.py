@@ -15,16 +15,18 @@ Design constraints (P5-O4):
 - No broker order calls; no credential exposure in UI payloads.
 - Heartbeats do NOT reset the freshness indicator (P5-A5).
 """
-from __future__ import annotations
 
-import threading
-from typing import Optional
+from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
 
 from src.services.monitor_state import SessionConfig, snapshot
-from src.services.stream_collector import CollectorState, FinalizationPolicy, StreamCollector
+from src.services.stream_collector import (
+    CollectorState,
+    FinalizationPolicy,
+    StreamCollector,
+)
 
 # Session-state keys (prefixed to avoid collision with other views)
 _KEY_COLLECTOR = "_monitor_collector"
@@ -32,8 +34,12 @@ _KEY_THREAD = "_monitor_thread"
 _KEY_PAUSED = "_monitor_paused"
 
 _DEFAULT_SESSION_CFG = SessionConfig(
-    or_minutes=15, bar_minutes=1, direction_mode="both",
-    target_r=2.0, breakout_buffer_pct=0.0, max_trades=1,
+    or_minutes=15,
+    bar_minutes=1,
+    direction_mode="both",
+    target_r=2.0,
+    breakout_buffer_pct=0.0,
+    max_trades=1,
     force_exit_time="15:59:00",
 )
 _DEFAULT_POLICY = FinalizationPolicy(
@@ -49,7 +55,9 @@ _DEFAULT_POLICY = FinalizationPolicy(
 # ---------------------------------------------------------------------------
 
 
-def render_monitor(symbol: str = "SPY", feed: str = "sip", timeframe: str = "1Min") -> None:
+def render_monitor(
+    symbol: str = "SPY", feed: str = "sip", timeframe: str = "1Min"
+) -> None:
     """Render the Market Monitor tab.
 
     Does NOT instantiate a real provider adapter — the UI only controls and
@@ -63,7 +71,7 @@ def render_monitor(symbol: str = "SPY", feed: str = "sip", timeframe: str = "1Mi
         "Closing this tab does not stop the data collector."
     )
 
-    collector: Optional[StreamCollector] = st.session_state.get(_KEY_COLLECTOR)
+    collector: StreamCollector | None = st.session_state.get(_KEY_COLLECTOR)
 
     if collector is None:
         st.info(
@@ -86,7 +94,9 @@ def render_monitor(symbol: str = "SPY", feed: str = "sip", timeframe: str = "1Mi
         st.session_state[_KEY_PAUSED] = not paused
     if col_stop.button("Stop collector", disabled=state.stopped):
         collector.stop()
-        st.warning("Collector stopped. Subscription released. Restart the app to reconnect.")
+        st.warning(
+            "Collector stopped. Subscription released. Restart the app to reconnect."
+        )
 
     if paused:
         st.info("Display paused — ingestion continues in the background.")
@@ -111,13 +121,20 @@ def render_monitor(symbol: str = "SPY", feed: str = "sip", timeframe: str = "1Mi
 
 def _render_connection_status(state: CollectorState) -> None:
     conn = state.connection_state
-    colour = {"connected": "🟢", "connecting": "🟡", "recovering": "🟠",
-               "disconnected": "🔴", "stopped": "⚫"}.get(conn, "❓")
+    colour = {
+        "connected": "🟢",
+        "connecting": "🟡",
+        "recovering": "🟠",
+        "disconnected": "🔴",
+        "stopped": "⚫",
+    }.get(conn, "❓")
     staleness = ""
     if state.stale:
         staleness = " ⚠️ STALE — no bar received recently"
-    st.markdown(f"**Feed:** `{state.symbol}` / `{state.feed}` / `{state.timeframe}`  "
-                f"  {colour} `{conn}`{staleness}")
+    st.markdown(
+        f"**Feed:** `{state.symbol}` / `{state.feed}` / `{state.timeframe}`  "
+        f"  {colour} `{conn}`{staleness}"
+    )
     cols = st.columns(3)
     cols[0].metric("Bars received", state.bars_received)
     cols[1].metric("Bars finalized", state.bars_finalized)
@@ -191,16 +208,19 @@ def _render_signal_history(mon) -> None:
         return
     rows = []
     for sig in mon.closed_signals:
-        rows.append({
-            "Direction": sig.direction,
-            "Entry": sig.entry_price,
-            "Stop": sig.stop_loss,
-            "Target": sig.take_profit,
-            "1R": sig.risk_amount,
-            "OR High": sig.or_high,
-            "OR Low": sig.or_low,
-        })
+        rows.append(
+            {
+                "Direction": sig.direction,
+                "Entry": sig.entry_price,
+                "Stop": sig.stop_loss,
+                "Target": sig.take_profit,
+                "1R": sig.risk_amount,
+                "OR High": sig.or_high,
+                "OR Low": sig.or_low,
+            }
+        )
     import pandas as pd
+
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 
@@ -232,11 +252,15 @@ def _render_demo_controls(symbol: str, feed: str, timeframe: str) -> None:
     or_minutes = st.slider("OR minutes", 5, 30, 15)
     total_bars = st.slider("Total bars to stream", 30, 390, 100)
     breakout_bar = st.number_input(
-        "Breakout bar index (–1 = no breakout)", min_value=-1, max_value=total_bars - 1, value=20
+        "Breakout bar index (–1 = no breakout)",
+        min_value=-1,
+        max_value=total_bars - 1,
+        value=20,
     )
     direction = st.radio("Breakout direction", ["LONG", "SHORT"], horizontal=True)
     if st.button("Attach fake stream"):
         from src.data.live_stream import FakeStreamAdapter, make_fake_bars
+
         session_id = pd.Timestamp.now(tz="America/New_York").date().isoformat()
         bars = make_fake_bars(
             session_id,
@@ -252,6 +276,7 @@ def _render_demo_controls(symbol: str, feed: str, timeframe: str) -> None:
         collector = StreamCollector(adapter, symbol, feed, timeframe, cfg)
         collector._session_id = session_id
         from src.services.monitor_state import new_session
+
         collector._monitor_state = new_session(session_id)
         st.session_state[_KEY_COLLECTOR] = collector
         st.rerun()
@@ -269,7 +294,7 @@ def attach_collector(collector: StreamCollector) -> None:
     ``render_monitor()`` is invoked.  Does nothing if a collector is already
     attached and not stopped.
     """
-    existing: Optional[StreamCollector] = st.session_state.get(_KEY_COLLECTOR)
+    existing: StreamCollector | None = st.session_state.get(_KEY_COLLECTOR)
     if existing is not None and not existing.state.stopped:
         return  # Deduplicate across browser reloads (P5-A1)
     st.session_state[_KEY_COLLECTOR] = collector

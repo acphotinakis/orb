@@ -7,7 +7,6 @@ crash recovery, redaction, and responsiveness — all offline on seeded cache.
 Real worker subprocesses are used unless noted; no network, no credentials.
 """
 
-import dataclasses
 import json
 import os
 import signal
@@ -20,11 +19,10 @@ import pandas as pd
 import pytest
 
 from src.backtest.engine import BacktestEngine
-from src.common.config import load_config
+from src.services.artifact_store import is_run_complete
 from src.services.registry import RunRegistry, redact_secrets
 from src.services.run_models import build_run_request
 from src.services.run_service import RunService
-from src.services.artifact_store import is_run_complete
 
 TERMINAL = ("cancelled", "succeeded", "failed")
 
@@ -35,18 +33,30 @@ def _seed_many_days(base_dir: Path, n_days: int, start="2024-01-02") -> None:
     days = pd.date_range(start=start, periods=n_days, freq="B").strftime("%Y-%m-%d")
     bars = []
     for d in days:
-        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert("UTC")
+        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert(
+            "UTC"
+        )
         ts = pd.date_range(start=open_utc, periods=391, freq="1min")
         n = len(ts)
-        bars.append(pd.DataFrame({
-            "timestamp": ts, "open": np.full(n, 500.0), "high": np.full(n, 500.5),
-            "low": np.full(n, 499.5), "close": np.full(n, 500.0),
-            "volume": np.full(n, 1000.0),
-        }))
+        bars.append(
+            pd.DataFrame(
+                {
+                    "timestamp": ts,
+                    "open": np.full(n, 500.0),
+                    "high": np.full(n, 500.5),
+                    "low": np.full(n, 499.5),
+                    "close": np.full(n, 500.0),
+                    "volume": np.full(n, 1000.0),
+                }
+            )
+        )
     combined = pd.concat(bars, ignore_index=True)
     combined.to_parquet(
-        raw_dir / f"SPY_1Min_{days[0].replace('-', '')}_{days[-1].replace('-', '')}.parquet",
-        engine="pyarrow", compression="zstd", index=False,
+        raw_dir
+        / f"SPY_1Min_{days[0].replace('-', '')}_{days[-1].replace('-', '')}.parquet",
+        engine="pyarrow",
+        compression="zstd",
+        index=False,
     )
     return days
 
@@ -55,8 +65,14 @@ def _request(days, label="t", plots=False):
     return build_run_request(
         "config/default_config.yaml",
         config_overrides={"data": {"timeframe": "1Min"}},
-        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1],
-                 "generate_plots": plots, "run_label": label, "log_level": "WARNING"},
+        options={
+            "refresh_cache": False,
+            "start_date": days[0],
+            "end_date": days[-1],
+            "generate_plots": plots,
+            "run_label": label,
+            "log_level": "WARNING",
+        },
     )
 
 
@@ -140,7 +156,9 @@ def test_state_survives_service_restart(seeded):
 
 def test_events_replay_dedup_and_corrupt_tail(tmp_path):
     reg = RunRegistry(tmp_path)
-    run_id = reg.submit(request_token="t", run_label=None, config={}, options={}, source={})
+    run_id = reg.submit(
+        request_token="t", run_label=None, config={}, options={}, source={}
+    )
     reg.claim_next_queued("o")
     reg.append_event(run_id, {"event_type": "a"})
     reg.append_event(run_id, {"event_type": "b"})
@@ -171,9 +189,14 @@ def test_cancel_queued_never_launches(tmp_path):
     base_req = _request(days)
     payload = dict(
         config=base_req.config.to_dict(),
-        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1],
-                 "refresh_cache": False, "generate_plots": False,
-                 "log_level": "WARNING", "run_label": "q"},
+        options={
+            "refresh_cache": False,
+            "start_date": days[0],
+            "end_date": days[-1],
+            "generate_plots": False,
+            "log_level": "WARNING",
+            "run_label": "q",
+        },
         source={},
     )
     r1 = svc.registry.submit(request_token="q1", run_label="one", **payload)
@@ -198,10 +221,17 @@ def test_cancel_running_and_terminal_passthrough(seeded, monkeypatch):
     reg = RunRegistry(root)
     req = _request(days)
     run_id = reg.submit(
-        request_token="cancel-run", run_label="cancel",
+        request_token="cancel-run",
+        run_label="cancel",
         config=req.config.to_dict(),
-        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1], "refresh_cache": False,
-                 "generate_plots": False, "log_level": "WARNING", "run_label": "cancel"},
+        options={
+            "refresh_cache": False,
+            "start_date": days[0],
+            "end_date": days[-1],
+            "generate_plots": False,
+            "log_level": "WARNING",
+            "run_label": "cancel",
+        },
         source={},
     )
     real_fetcher = pipeline_module.DataFetcher
@@ -216,8 +246,9 @@ def test_cancel_running_and_terminal_passthrough(seeded, monkeypatch):
     thread = threading.Thread(target=run_worker, args=(root, run_id))
     thread.start()
     try:
-        _wait_until(lambda: reg.get(run_id)["status"] == "running",
-                    desc="worker pickup")
+        _wait_until(
+            lambda: reg.get(run_id)["status"] == "running", desc="worker pickup"
+        )
         assert reg.request_cancel(run_id) == "cancelling"
         thread.join(timeout=60)
         assert not thread.is_alive()
@@ -236,14 +267,18 @@ def test_cancel_running_and_terminal_passthrough(seeded, monkeypatch):
 
 def test_terminal_race_exactly_one_wins(tmp_path):
     reg = RunRegistry(tmp_path)
-    run_id = reg.submit(request_token="r", run_label=None, config={}, options={}, source={})
+    run_id = reg.submit(
+        request_token="r", run_label=None, config={}, options={}, source={}
+    )
     reg.claim_next_queued("o")
     assert reg.finish(run_id, "succeeded") is True
     assert reg.finish(run_id, "cancelled") is False
     assert reg.get(run_id)["status"] == "succeeded"
     assert reg.request_cancel(run_id) == "succeeded"
 
-    run2 = reg.submit(request_token="r2", run_label=None, config={}, options={}, source={})
+    run2 = reg.submit(
+        request_token="r2", run_label=None, config={}, options={}, source={}
+    )
     reg.claim_next_queued("o")
     reg.request_cancel(run2)
     assert reg.finish(run2, "cancelled") is True
@@ -263,12 +298,19 @@ def test_killed_worker_reconciles_failed_without_rerun(seeded):
     req = build_run_request(
         "config/default_config.yaml",
         config_overrides={"data": {"timeframe": "1Min"}},
-        options={"refresh_cache": False, "start_date": more[0], "end_date": more[-1],
-                 "generate_plots": False, "run_label": "doomed", "log_level": "WARNING"},
+        options={
+            "refresh_cache": False,
+            "start_date": more[0],
+            "end_date": more[-1],
+            "generate_plots": False,
+            "run_label": "doomed",
+            "log_level": "WARNING",
+        },
     )
     run_id = svc.submit_run(req, request_token="doomed")
-    _wait_until(lambda: svc.get_run(run_id)["status"] == "running",
-                desc="worker pickup")
+    _wait_until(
+        lambda: svc.get_run(run_id)["status"] == "running", desc="worker pickup"
+    )
     pid = svc.get_run(run_id)["worker_pid"]
     assert pid
     os.kill(pid, signal.SIGKILL)
@@ -297,12 +339,19 @@ def test_restart_while_live_dispatches_no_duplicate(seeded):
     req = build_run_request(
         "config/default_config.yaml",
         config_overrides={"data": {"timeframe": "1Min"}},
-        options={"refresh_cache": False, "start_date": more[0], "end_date": more[-1],
-                 "generate_plots": False, "run_label": "live", "log_level": "WARNING"},
+        options={
+            "refresh_cache": False,
+            "start_date": more[0],
+            "end_date": more[-1],
+            "generate_plots": False,
+            "run_label": "live",
+            "log_level": "WARNING",
+        },
     )
     run_id = svc.submit_run(req, request_token="live-1")
-    _wait_until(lambda: svc.get_run(run_id)["status"] == "running",
-                desc="worker pickup")
+    _wait_until(
+        lambda: svc.get_run(run_id)["status"] == "running", desc="worker pickup"
+    )
     restarted = RunService(root)  # supervisor restart analogue
     assert restarted.ensure_supervisor() is None  # slot busy: no duplicate
     assert _wait_status(svc, run_id) == "succeeded"
@@ -310,7 +359,9 @@ def test_restart_while_live_dispatches_no_duplicate(seeded):
 
 def test_stale_lease_with_dead_pid_and_owner_checks(tmp_path):
     reg = RunRegistry(tmp_path)
-    run_id = reg.submit(request_token="s", run_label=None, config={}, options={}, source={})
+    run_id = reg.submit(
+        request_token="s", run_label=None, config={}, options={}, source={}
+    )
     assert reg.claim_next_queued("owner-A") == run_id
     assert reg.adopt_worker(run_id, "owner-A", 999999999) is True
     assert reg.adopt_worker(run_id, "owner-B", 123) is False  # ownership wins
@@ -331,10 +382,17 @@ def test_storage_failure_is_explicit_never_success(tmp_path):
     # Hold dispatch, break the experiments root, then supervise: the worker
     # must fail explicitly instead of publishing success.
     run_id = svc.registry.submit(
-        request_token="disk-fail", run_label="disk",
+        request_token="disk-fail",
+        run_label="disk",
         config=req.config.to_dict(),
-        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1], "refresh_cache": False,
-                 "generate_plots": False, "log_level": "WARNING", "run_label": "disk"},
+        options={
+            "refresh_cache": False,
+            "start_date": days[0],
+            "end_date": days[-1],
+            "generate_plots": False,
+            "log_level": "WARNING",
+            "run_label": "disk",
+        },
         source={},
     )
     import shutil
@@ -348,11 +406,19 @@ def test_storage_failure_is_explicit_never_success(tmp_path):
 
 def test_secret_redaction_and_unsafe_label(tmp_path):
     reg = RunRegistry(tmp_path)
-    run_id = reg.submit(request_token="sec", run_label="../../evil",
-                        config={}, options={}, source={})
+    run_id = reg.submit(
+        request_token="sec", run_label="../../evil", config={}, options={}, source={}
+    )
     reg.claim_next_queued("o")
-    reg.append_event(run_id, {"event_type": "x", "error": "fetch failed api_key=AKIAIOSFODNN7EXAMPLE"})
-    reg.finish(run_id, "failed", "boom token=sk-abcdef123456 secret hunter2")
+    reg.append_event(
+        run_id,
+        {"event_type": "x", "error": "fetch failed api_key=AKIAIOSFODNN7EXAMPLE"},
+    )
+    reg.finish(
+        run_id,
+        "failed",
+        "boom token=sk-abcdef123456 secret hunter2",  # gitleaks:allow
+    )
     row = reg.get(run_id)
     assert "AKIAIOSFODNN7EXAMPLE" not in row["error"]
     assert "sk-abcdef123456" not in row["error"]
@@ -390,7 +456,9 @@ def test_registry_source_reaches_manifest(seeded):
     assert manifest["source"]["revision"] == _json.loads(row["source_json"])["revision"]
 
 
-def test_engine_without_hooks_reports_not_cancelled(synthetic_rth_bars, mock_app_config):
+def test_engine_without_hooks_reports_not_cancelled(
+    synthetic_rth_bars, mock_app_config
+):
     res = BacktestEngine(mock_app_config).run(synthetic_rth_bars)
     assert res.cancelled is False
 
@@ -432,17 +500,26 @@ def test_cpu_loop_cancel_acknowledged_quickly(tmp_path):
     req = build_run_request(
         "config/default_config.yaml",
         config_overrides={"data": {"timeframe": "1Min"}},
-        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1],
-                 "generate_plots": False, "run_label": "cpu-cancel",
-                 "log_level": "WARNING"},
+        options={
+            "refresh_cache": False,
+            "start_date": days[0],
+            "end_date": days[-1],
+            "generate_plots": False,
+            "run_label": "cpu-cancel",
+            "log_level": "WARNING",
+        },
     )
     run_id = svc.submit_run(req, request_token="cpu-cancel-1")
-    _wait_until(lambda: svc.get_run(run_id)["status"] == "running",
-                desc="worker pickup")
+    _wait_until(
+        lambda: svc.get_run(run_id)["status"] == "running", desc="worker pickup"
+    )
     t0 = _time.time()
     assert svc.cancel_run(run_id) == "cancelling"
-    _wait_until(lambda: svc.get_run(run_id)["status"] == "cancelled",
-                timeout=30.0, desc="cancel ack")
+    _wait_until(
+        lambda: svc.get_run(run_id)["status"] == "cancelled",
+        timeout=30.0,
+        desc="cancel ack",
+    )
     ack_secs = _time.time() - t0
     print(f"\ncpu-cancel ack: {ack_secs:.2f}s")
     assert ack_secs < 2.0
@@ -459,10 +536,17 @@ def test_slow_fetch_keeps_status_responsive(seeded, monkeypatch):
     reg = RunRegistry(root)
     req = _request(days)
     run_id = reg.submit(
-        request_token="slow-1", run_label="slow",
+        request_token="slow-1",
+        run_label="slow",
         config=req.config.to_dict(),
-        options={"refresh_cache": False, "start_date": days[0], "end_date": days[-1], "refresh_cache": False,
-                 "generate_plots": False, "log_level": "WARNING", "run_label": "slow"},
+        options={
+            "refresh_cache": False,
+            "start_date": days[0],
+            "end_date": days[-1],
+            "generate_plots": False,
+            "log_level": "WARNING",
+            "run_label": "slow",
+        },
         source={},
     )
     real_fetcher = pipeline_module.DataFetcher

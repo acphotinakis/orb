@@ -36,16 +36,15 @@ Usage
 from __future__ import annotations
 
 import datetime
+import re
 from dataclasses import dataclass, field
-from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
-import re
 
 from src.common.exceptions import DataValidationError
 from src.common.logger import get_logger
-from src.common.time_utils import EASTERN_TZ, filter_rth
+from src.common.time_utils import EASTERN_TZ
 
 logger = get_logger(__name__)
 
@@ -89,7 +88,7 @@ class ValidationReport:
     duplicates_removed: int
     invalid_ohlc_removed: int
     missing_timestamps_count: int
-    flagged_sessions: List[str] = field(default_factory=list)
+    flagged_sessions: list[str] = field(default_factory=list)
     is_valid: bool = True
 
     def summary(self) -> str:
@@ -114,7 +113,9 @@ class ValidationReport:
 # Private helpers
 # ---------------------------------------------------------------------------
 def _timeframe_to_pandas_freq(timeframe: str) -> str:
-    """Normalize Alpaca timeframe string (e.g. 15Min, 1Hour, 1Day) to Pandas offset string."""
+    """Normalize Alpaca timeframe string (e.g. 15Min, 1Hour, 1Day)
+    to Pandas offset string.
+    """
     tf = timeframe.strip()
     if tf.lower().endswith("min") or tf.lower().endswith("t"):
         num = re.findall(r"\d+", tf)
@@ -158,7 +159,7 @@ def _sort_chronologically(df: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values("timestamp").reset_index(drop=True)
 
 
-def _remove_duplicates(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+def _remove_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """Remove duplicate timestamps, keeping the bar with the highest volume.
 
     When two bars share the same timestamp, the one with the greater volume
@@ -183,7 +184,7 @@ def _remove_duplicates(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
     return df_deduped, n_removed
 
 
-def _remove_nan_inf(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+def _remove_nan_inf(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """Drop rows containing NaN or ±Inf in any OHLCV column.
 
     Args:
@@ -203,7 +204,7 @@ def _remove_nan_inf(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
     return df_clean, n_before - len(df_clean)
 
 
-def _validate_ohlc_geometry(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+def _validate_ohlc_geometry(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """Remove bars that violate OHLC geometric consistency constraints.
 
     Constraints applied (vectorised):
@@ -218,8 +219,6 @@ def _validate_ohlc_geometry(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
     Returns:
         ``(valid_df, n_removed)``.
     """
-    n_before = len(df)
-
     positive_prices = (
         (df["open"] > 0) & (df["high"] > 0) & (df["low"] > 0) & (df["close"] > 0)
     )
@@ -239,7 +238,7 @@ def _validate_ohlc_geometry(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
 def _audit_rth_gaps(
     df: pd.DataFrame,
     timeframe: str,
-) -> Tuple[int, List[str]]:
+) -> tuple[int, list[str]]:
     """Audit RTH bars for missing bar slots and flag sessions with major gaps."""
     if df.empty:
         return 0, []
@@ -294,7 +293,7 @@ def validate_and_clean_bars(
     df: pd.DataFrame,
     timeframe: str,
     strict: bool = False,
-) -> Tuple[pd.DataFrame, ValidationReport]:
+) -> tuple[pd.DataFrame, ValidationReport]:
     """Validate and clean a raw 1-minute OHLCV bar DataFrame.
 
     Executes the full cleaning pipeline in a deterministic order:

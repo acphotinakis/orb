@@ -79,7 +79,7 @@ class DataProcessor:
         """
         Takes raw/validated bars, normalizes timezone, filters RTH,
         adds session columns, and writes to data/processed/SPY/sessions.parquet.
-        
+
         Output schema:
         ['session_id', 'timestamp', 'open', 'high', 'low', 'close', 'volume',
          'minute_of_day', 'is_opening_range', 'is_trading_window', 'is_force_exit']

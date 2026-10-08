@@ -11,10 +11,9 @@ accrual based on configurable parameters.
 from __future__ import annotations
 
 import math
-from typing import Tuple
 
-from src.common.config import ExecutionConfig
 from src.backtest.models import ExitReason, PositionSide
+from src.common.config import ExecutionConfig
 from src.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -67,7 +66,7 @@ class ExecutionModel:
         direction: str,
         price: float,
         shares: int,
-    ) -> Tuple[float, float, float]:
+    ) -> tuple[float, float, float]:
         """Calculates entry fill price with adverse slippage and commission.
 
         Returns:
@@ -95,10 +94,12 @@ class ExecutionModel:
         price: float,
         shares: int,
         reason: ExitReason,
-    ) -> Tuple[float, float, float]:
-        """Calculates exit fill price with adverse slippage (for STOP and EOD) and commission.
+    ) -> tuple[float, float, float]:
+        """Calculates exit fill price with adverse slippage (for STOP and EOD)
+        and commission.
 
-        Limit target orders (TARGET) assume execution at exact price without adverse slippage.
+        Limit target orders (TARGET) assume execution at exact price without
+        adverse slippage.
         Market/Stop exits (STOP, EOD) incur adverse slippage.
 
         Returns:

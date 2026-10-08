@@ -12,8 +12,6 @@ full-resolution series held by the caller.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -22,7 +20,9 @@ from plotly.subplots import make_subplots
 MAX_DISPLAY_POINTS = 5000
 
 
-def downsample_for_display(df: pd.DataFrame, max_points: int = MAX_DISPLAY_POINTS) -> pd.DataFrame:
+def downsample_for_display(
+    df: pd.DataFrame, max_points: int = MAX_DISPLAY_POINTS
+) -> pd.DataFrame:
     """Stride a frame for display, always keeping first/last/global extrema.
 
     Numeric extrema are computed over float columns only; non-numeric frames
@@ -66,13 +66,17 @@ def equity_figure(equity_df: pd.DataFrame) -> go.Figure:
     x = equity_df["timestamp"] if "timestamp" in equity_df.columns else equity_df.index
 
     fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3],
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.7, 0.3],
         subplot_titles=("Equity", "Drawdown ($)"),
     )
     fig.add_trace(go.Scatter(x=x, y=equity, mode="lines", name="Equity"), row=1, col=1)
     fig.add_trace(
         go.Scatter(x=x, y=drawdown, mode="lines", name="Drawdown", fill="tozeroy"),
-        row=2, col=1,
+        row=2,
+        col=1,
     )
     fig.update_layout(title="Portfolio equity", showlegend=False)
     return fig
@@ -81,9 +85,9 @@ def equity_figure(equity_df: pd.DataFrame) -> go.Figure:
 def session_candlestick(
     session_df: pd.DataFrame,
     *,
-    or_high: Optional[float] = None,
-    or_low: Optional[float] = None,
-    session_trades: Optional[pd.DataFrame] = None,
+    or_high: float | None = None,
+    or_low: float | None = None,
+    session_trades: pd.DataFrame | None = None,
 ) -> go.Figure:
     """OHLC candlesticks with frozen-range lines and entry/exit markers."""
     required = {"timestamp", "open", "high", "low", "close"}
@@ -127,7 +131,8 @@ def session_candlestick(
             ):
                 if level in session_trades.columns and pd.notna(trade.get(level)):
                     fig.add_hline(
-                        y=trade[level], line_dash="dot",
+                        y=trade[level],
+                        line_dash="dot",
                         annotation_text=f"{label} {trade.get('trade_id', '')}",
                     )
     fig.update_layout(title="Session bars", xaxis_rangeslider_visible=False)

@@ -36,7 +36,7 @@ Usage
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Base
@@ -185,7 +185,7 @@ class DataValidationError(ORBBaseException):
         self,
         message: str,
         session_date: str = "",
-        bar_index: Optional[int] = None,
+        bar_index: int | None = None,
         column: str = "",
         **context: Any,
     ) -> None:
@@ -237,7 +237,7 @@ class TemporalLeakageError(ORBBaseException):
         self,
         message: str,
         session_date: str = "",
-        bar_index: Optional[int] = None,
+        bar_index: int | None = None,
         offending_timestamp: str = "",
         **context: Any,
     ) -> None:
@@ -282,7 +282,7 @@ class BacktestExecutionError(ORBBaseException):
         self,
         message: str,
         session_date: str = "",
-        bar_index: Optional[int] = None,
+        bar_index: int | None = None,
         trade_id: str = "",
         **context: Any,
     ) -> None:

@@ -17,8 +17,8 @@ Run::
 
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 # Streamlit executes this file with the script directory on sys.path.
 # Resolve the checkout from the file so direct launches also work without
@@ -27,28 +27,31 @@ _REPOSITORY_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPOSITORY_ROOT not in sys.path:
     sys.path.insert(0, _REPOSITORY_ROOT)
 
-import pandas as pd
-import streamlit as st
+import pandas as pd  # noqa: E402
+import streamlit as st  # noqa: E402
 
-from src.dashboard.charts import (
+from src.common.exceptions import ConfigurationError  # noqa: E402
+from src.dashboard.charts import (  # noqa: E402
     downsample_for_display,
     equity_figure,
     r_distribution_figure,
     session_candlestick,
 )
-from src.services.artifact_store import (
+from src.services.artifact_store import (  # noqa: E402
     RUN_STATUS_COMPLETE,
-    display_value,
     discover_runs,
+    display_value,
     is_synthetic_run,
     read_download_bytes,
     read_run_artifacts,
     read_session_bars,
     to_et_display,
 )
-from src.common.exceptions import ConfigurationError
-from src.services.run_models import RESEARCH_PRESET_1MIN, build_run_request
-from src.services.run_service import RunService
+from src.services.run_models import (  # noqa: E402
+    RESEARCH_PRESET_1MIN,
+    build_run_request,
+)
+from src.services.run_service import RunService  # noqa: E402
 
 MAX_TABLE_ROWS = 500
 
@@ -135,7 +138,7 @@ def main() -> None:
                     st.text(f"{run.run_id}: {run.status} — {run.detail}")
         return
 
-    options = { _run_option_label(r): r.run_id for r in complete }
+    options = {_run_option_label(r): r.run_id for r in complete}
     selected_label = st.sidebar.selectbox("Run", sorted(options), key="run_selector")
     run_id = options[selected_label]
 
@@ -146,21 +149,30 @@ def main() -> None:
         return
 
     manifest = art.manifest
-    mode = st.sidebar.radio("View", ["Completed results", "Replay", "Compare", "Market Monitor"], key="view_mode")
+    mode = st.sidebar.radio(
+        "View",
+        ["Completed results", "Replay", "Compare", "Market Monitor"],
+        key="view_mode",
+    )
     if mode == "Replay":
         from src.dashboard.replay_view import render_replay
+
         render_replay(root, run_id, manifest)
         return
     if mode == "Compare":
         from src.dashboard.comparison_view import render_comparison
+
         render_comparison(root, run_id, art, options)
         return
     if mode == "Market Monitor":
         from src.dashboard.monitor_view import render_monitor
+
         render_monitor(
             symbol=manifest.get("config", {}).get("data", {}).get("symbol", "SPY"),
             feed=manifest.get("config", {}).get("data", {}).get("feed", "sip"),
-            timeframe=manifest.get("config", {}).get("data", {}).get("timeframe", "1Min"),
+            timeframe=manifest.get("config", {})
+            .get("data", {})
+            .get("timeframe", "1Min"),
         )
         return
     if is_synthetic_run(manifest):
@@ -187,16 +199,16 @@ def main() -> None:
             f"Text summary: equity from ${first_eq:,.2f} to ${last_eq:,.2f} "
             f"over {len(equity)} recorded bars."
         )
-    st.plotly_chart(
-        equity_figure(downsample_for_display(equity)), width="stretch"
-    )
+    st.plotly_chart(equity_figure(downsample_for_display(equity)), width="stretch")
 
     filtered_trades = _trade_table(art.trades)
 
     st.subheader("Session explorer")
-    sessions = sorted(equity["session_id"].dropna().unique().tolist()) if (
-        not equity.empty and "session_id" in equity.columns
-    ) else []
+    sessions = (
+        sorted(equity["session_id"].dropna().unique().tolist())
+        if (not equity.empty and "session_id" in equity.columns)
+        else []
+    )
     if not sessions:
         st.info("No sessions recorded for this run.")
     else:
@@ -212,21 +224,29 @@ def main() -> None:
         )
         try:
             bars = read_session_bars(root, manifest, session)
-            st.text(f"Session {session}: {len(bars)} bars (selected-session OHLCV only).")
+            st.text(
+                f"Session {session}: {len(bars)} bars (selected-session OHLCV only)."
+            )
             session_trades = (
                 filtered_trades[filtered_trades["date"] == session]
                 if (not filtered_trades.empty and "date" in filtered_trades.columns)
                 else filtered_trades.iloc[0:0]
             )
-            or_high = float(session_trades["or_high"].iloc[0]) if (
-                not session_trades.empty and "or_high" in session_trades.columns
-            ) else None
-            or_low = float(session_trades["or_low"].iloc[0]) if (
-                not session_trades.empty and "or_low" in session_trades.columns
-            ) else None
+            or_high = (
+                float(session_trades["or_high"].iloc[0])
+                if (not session_trades.empty and "or_high" in session_trades.columns)
+                else None
+            )
+            or_low = (
+                float(session_trades["or_low"].iloc[0])
+                if (not session_trades.empty and "or_low" in session_trades.columns)
+                else None
+            )
             st.plotly_chart(
                 session_candlestick(
-                    bars, or_high=or_high, or_low=or_low,
+                    bars,
+                    or_high=or_high,
+                    or_low=or_low,
                     session_trades=session_trades,
                 ),
                 width="stretch",
@@ -237,11 +257,16 @@ def main() -> None:
                 detail = session_trades[
                     session_trades["trade_id"].astype(str) == chosen
                 ].iloc[0]
-                detail_text = "\n".join(
-                    f"{col}: "
-                    f"{to_et_display(detail[col]) if col in ('entry_time', 'exit_time') else detail[col]}"
-                    for col in session_trades.columns
-                )
+                lines = []
+                for col in session_trades.columns:
+                    val = detail[col]
+                    display_v = (
+                        to_et_display(val)
+                        if col in ("entry_time", "exit_time")
+                        else val
+                    )
+                    lines.append(f"{col}: {display_v}")
+                detail_text = "\n".join(lines)
                 st.text(detail_text)  # rendered as text, never as HTML
         except ConfigurationError as exc:
             st.error(f"Session unavailable: {exc}")
@@ -260,7 +285,10 @@ def main() -> None:
         try:
             data, filename = read_download_bytes(root, run_id, rel)
             st.download_button(
-                f"Download {filename}", data=data, file_name=filename, key=f"dl_{filename}"
+                f"Download {filename}",
+                data=data,
+                file_name=filename,
+                key=f"dl_{filename}",
             )
         except ConfigurationError:
             st.caption(f"{rel} not available for this run.")
@@ -282,6 +310,7 @@ def _run_control_section(root: str) -> None:
         if not _svc:
             _svc.append(RunService(root))
         return _svc[0]
+
     if "request_token" not in st.session_state:
         import uuid as _uuid
 

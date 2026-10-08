@@ -48,10 +48,8 @@ Usage
 
 from __future__ import annotations
 
-import datetime
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
 
 import pandas as pd
 
@@ -145,8 +143,8 @@ class OpeningRangeCalculator:
     def __init__(
         self,
         or_minutes: int = 15,
-        output_dir: Optional[Path] = None,
-        timeframe: Optional[str] = None,
+        output_dir: Path | None = None,
+        timeframe: str | None = None,
         timeframe_minutes: int = 1,
     ) -> None:
         if or_minutes <= 0:
@@ -198,7 +196,7 @@ class OpeningRangeCalculator:
             )
 
         # --- Isolate OR bars only (is_opening_range = True) ---
-        or_bars = session_bars[session_bars["is_opening_range"] == True].copy()
+        or_bars = session_bars[session_bars["is_opening_range"]].copy()
 
         # --- Temporal causality guard ---
         # Any bar with minute_of_day >= or_minutes that is NOT flagged as
@@ -262,7 +260,8 @@ class OpeningRangeCalculator:
         start_time = or_bars["timestamp"].min()
         end_time = or_bars["timestamp"].max()
 
-        # Validity gate: dynamic expected bars based on timeframe (e.g. 15 for 1Min, 3 for 5Min)
+        # Validity gate: dynamic expected bars based on timeframe
+        # (e.g. 15 for 1Min, 3 for 5Min)
         expected_bars = max(1, self._or_minutes // self._timeframe_minutes)
         is_valid: bool = (bar_count >= expected_bars) and (or_width > 0)
 
@@ -304,7 +303,7 @@ class OpeningRangeCalculator:
     def calculate_all(
         self,
         df: pd.DataFrame,
-    ) -> Dict[str, OpeningRange]:
+    ) -> dict[str, OpeningRange]:
         """Compute opening ranges for all sessions in a processed dataset.
 
         Iterates over sessions in chronological order.  Each session's OR is
@@ -313,7 +312,8 @@ class OpeningRangeCalculator:
         ``is_valid=False`` record instead.
 
         Args:
-            df: Processed bar DataFrame (output of :class:`~src.data.processor.DataProcessor`).
+            df: Processed bar DataFrame
+                (output of :class:`~src.data.processor.DataProcessor`).
                 Must contain a ``session_id`` column and all columns in
                 :data:`_REQUIRED_COLS`.
 
@@ -336,7 +336,7 @@ class OpeningRangeCalculator:
             len(session_ids),
         )
 
-        ranges: Dict[str, OpeningRange] = {}
+        ranges: dict[str, OpeningRange] = {}
         for sid in session_ids:
             session_df = df[df["session_id"] == sid]
             try:
@@ -379,9 +379,9 @@ class OpeningRangeCalculator:
 
     @staticmethod
     def save_daily_ranges(
-        ranges: Dict[str, OpeningRange],
-        output_dir: Optional[Path] = None,
-        output_path: Optional[Path] = None,
+        ranges: dict[str, OpeningRange],
+        output_dir: Path | None = None,
+        output_path: Path | None = None,
     ) -> Path:
         """Serialise computed opening ranges to a Parquet file.
 
@@ -429,7 +429,7 @@ class OpeningRangeCalculator:
         return out_path
 
     @staticmethod
-    def load_ranges(path: Path) -> Dict[str, OpeningRange]:
+    def load_ranges(path: Path) -> dict[str, OpeningRange]:
         """Load persisted opening ranges from a Parquet file.
 
         Args:
@@ -444,7 +444,7 @@ class OpeningRangeCalculator:
         if not path.exists():
             raise FileNotFoundError(f"Opening ranges file not found: '{path}'.")
         df = pd.read_parquet(path, engine=_PARQUET_ENGINE)
-        result: Dict[str, OpeningRange] = {}
+        result: dict[str, OpeningRange] = {}
         for _, row in df.iterrows():
             result[row["session_id"]] = OpeningRange(
                 session_id=str(row["session_id"]),
@@ -468,8 +468,8 @@ class OpeningRangeCalculator:
 def compute_opening_ranges(
     df: pd.DataFrame,
     or_minutes: int = 15,
-    output_dir: Optional[Path] = None,
-) -> Dict[str, OpeningRange]:
+    output_dir: Path | None = None,
+) -> dict[str, OpeningRange]:
     """Functional convenience wrapper around :class:`OpeningRangeCalculator`.
 
     Args:

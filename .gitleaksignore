@@ -1,0 +1,3 @@
+# Gitleaks ignore baseline
+# Test-only fake token used in unit test verifying redact_secrets()
+69fc4bebd055995f79e26778da5c40c23bbe99c3:tests/services/test_run_control.py:generic-api-key:355

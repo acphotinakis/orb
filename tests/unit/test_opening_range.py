@@ -5,9 +5,9 @@ Unit tests for Opening Range calculation engine and causality guards.
 """
 
 import pytest
-import pandas as pd
-from src.strategy.opening_range import OpeningRangeCalculator, OpeningRange
+
 from src.common.exceptions import TemporalLeakageError
+from src.strategy.opening_range import OpeningRange, OpeningRangeCalculator
 
 
 def test_opening_range_calculation(synthetic_rth_bars):

@@ -1,10 +1,10 @@
 # Quantitative System Architecture Plan: SPY Opening Range Breakout (ORB)
 
-**System Name:** `orb-spy-alpaca`  
-**Target Asset:** `SPY` (SPDR S&P 500 ETF Trust)  
-**Data Provider:** Alpaca Markets Data API (`alpaca-py`)  
-**Design Role:** Senior Quantitative Systems Architect  
-**Document Status:** Approved Architectural Specification  
+**System Name:** `orb-spy-alpaca`
+**Target Asset:** `SPY` (SPDR S&P 500 ETF Trust)
+**Data Provider:** Alpaca Markets Data API (`alpaca-py`)
+**Design Role:** Senior Quantitative Systems Architect
+**Document Status:** Approved Architectural Specification
 **Specification Version:** `v1.0.0`
 
 ---

@@ -7,7 +7,6 @@ path safety, fingerprint sensitivity, and source provenance.
 
 import json
 
-import pandas as pd
 import pytest
 
 from src.common.exceptions import ConfigurationError

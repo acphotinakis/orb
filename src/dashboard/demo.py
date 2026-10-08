@@ -34,17 +34,21 @@ FLAT_DAYS = ("2024-02-05", "2024-02-06")
 
 def _day_frame(date_str: str, breaks: list | None = None) -> pd.DataFrame:
     """One 391-bar RTH day; *breaks* is [(index, field, value), ...]."""
-    open_utc = pd.Timestamp(f"{date_str} 09:30:00", tz="America/New_York").tz_convert("UTC")
+    open_utc = pd.Timestamp(f"{date_str} 09:30:00", tz="America/New_York").tz_convert(
+        "UTC"
+    )
     ts = pd.date_range(start=open_utc, periods=391, freq="1min")
     n = len(ts)
-    df = pd.DataFrame({
-        "timestamp": ts,
-        "open": np.full(n, 500.0),
-        "high": np.full(n, 500.5),
-        "low": np.full(n, 499.5),
-        "close": np.full(n, 500.0),
-        "volume": np.full(n, 1000.0),
-    })
+    df = pd.DataFrame(
+        {
+            "timestamp": ts,
+            "open": np.full(n, 500.0),
+            "high": np.full(n, 500.5),
+            "low": np.full(n, 499.5),
+            "close": np.full(n, 500.0),
+            "volume": np.full(n, 1000.0),
+        }
+    )
     df.loc[5, "high"] = 501.0
     df.loc[8, "low"] = 499.0
     for idx, field, value in breaks or []:
@@ -57,13 +61,21 @@ def _seed_raw_cache(root: Path) -> None:
         [
             _day_frame(
                 "2024-01-02",
-                [(16, "close", 501.5), (16, "high", 501.6),
-                 (25, "close", 506.6), (25, "high", 507.0)],
+                [
+                    (16, "close", 501.5),
+                    (16, "high", 501.6),
+                    (25, "close", 506.6),
+                    (25, "high", 507.0),
+                ],
             ),
             _day_frame(
                 "2024-01-03",
-                [(16, "close", 501.5), (16, "high", 501.6),
-                 (25, "close", 498.5), (25, "low", 498.0)],
+                [
+                    (16, "close", 501.5),
+                    (16, "high", 501.6),
+                    (25, "close", 498.5),
+                    (25, "low", 498.0),
+                ],
             ),
             _day_frame("2024-01-04", [(16, "close", 501.5), (16, "high", 501.6)]),
         ],
@@ -74,11 +86,15 @@ def _seed_raw_cache(root: Path) -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
     normal.to_parquet(
         raw_dir / "SPY_1Min_20240102_20240104.parquet",
-        engine="pyarrow", compression="zstd", index=False,
+        engine="pyarrow",
+        compression="zstd",
+        index=False,
     )
     flat.to_parquet(
         raw_dir / "SPY_1Min_20240205_20240206.parquet",
-        engine="pyarrow", compression="zstd", index=False,
+        engine="pyarrow",
+        compression="zstd",
+        index=False,
     )
 
 
@@ -92,8 +108,18 @@ def generate_demo(root: str | Path = "demo_runs") -> list[str]:
     )
     made = []
     for run_id, label, start, end in (
-        ("demo_normal", "synthetic demo (normal: TP/STOP/EOD)", "2024-01-02", "2024-01-04"),
-        ("demo_zero_trades", "synthetic demo (zero trades)", "2024-02-05", "2024-02-06"),
+        (
+            "demo_normal",
+            "synthetic demo (normal: TP/STOP/EOD)",
+            "2024-01-02",
+            "2024-01-04",
+        ),
+        (
+            "demo_zero_trades",
+            "synthetic demo (zero trades)",
+            "2024-02-05",
+            "2024-02-06",
+        ),
     ):
         result = ORBPipeline(config=cfg, base_dir=root_path).run(
             start_date=start,
@@ -105,9 +131,7 @@ def generate_demo(root: str | Path = "demo_runs") -> list[str]:
             log_level="WARNING",
             run_label=label,
         )
-        exp = next(
-            (root_path / "experiments").glob(f"{run_id}__*")
-        )
+        exp = next((root_path / "experiments").glob(f"{run_id}__*"))
         made.append(exp.name)
         print(f"demo run {run_id}: {result.total_trades} trades -> {exp}")
     return made
@@ -118,7 +142,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default="demo_runs", help="Demo storage root.")
     args = parser.parse_args(argv)
     generate_demo(args.root)
-    print(f"Launch: .orb_venv/bin/streamlit run src/dashboard/app.py (root: {args.root})")
+    print(
+        f"Launch: .orb_venv/bin/streamlit run src/dashboard/app.py (root: {args.root})"
+    )
     return 0
 
 

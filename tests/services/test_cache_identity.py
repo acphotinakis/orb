@@ -42,7 +42,8 @@ def test_or_duration_change_rebuilds(tmp_path, mock_app_config, synthetic_rth_ba
     dest = tmp_path / "proc" / "sessions.parquet"
 
     out15 = proc.process(
-        synthetic_rth_bars, output_path=dest,
+        synthetic_rth_bars,
+        output_path=dest,
         identity=_identity_for(synthetic_rth_bars, mock_app_config),
     )
     cfg30 = dataclasses.replace(
@@ -53,13 +54,14 @@ def test_or_duration_change_rebuilds(tmp_path, mock_app_config, synthetic_rth_ba
     )
     proc30 = _processor(cfg30, tmp_path)
     out30 = proc30.process(
-        synthetic_rth_bars, output_path=dest,
+        synthetic_rth_bars,
+        output_path=dest,
         identity=_identity_for(synthetic_rth_bars, cfg30),
     )
-    assert len(out30[out30["is_opening_range"]]) > len(
-        out15[out15["is_opening_range"]]
+    assert len(out30[out30["is_opening_range"]]) > len(out15[out15["is_opening_range"]])
+    sidecar = json.loads(
+        (tmp_path / "proc" / "sessions.parquet.identity.json").read_text()
     )
-    sidecar = json.loads((tmp_path / "proc" / "sessions.parquet.identity.json").read_text())
     assert sidecar["identity"]["opening_range_minutes"] == 30
 
 
@@ -104,11 +106,15 @@ def test_explicit_refresh_rebuilds(tmp_path, mock_app_config, synthetic_rth_bars
         synthetic_rth_bars, output_path=dest, identity=ident, force_refresh=True
     )
     pd.testing.assert_frame_equal(first, second)
-    sidecar = json.loads((tmp_path / "proc" / "sessions.parquet.identity.json").read_text())
+    sidecar = json.loads(
+        (tmp_path / "proc" / "sessions.parquet.identity.json").read_text()
+    )
     assert sidecar["identity"] == ident
 
 
-def test_corrupt_cache_and_sidecar_rebuild(tmp_path, mock_app_config, synthetic_rth_bars):
+def test_corrupt_cache_and_sidecar_rebuild(
+    tmp_path, mock_app_config, synthetic_rth_bars
+):
     """T06/T07: corrupt parquet or sidecar never surfaces; it rebuilds."""
     proc = _processor(mock_app_config, tmp_path)
     dest = tmp_path / "proc" / "sessions.parquet"

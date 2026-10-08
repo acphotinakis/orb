@@ -27,7 +27,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
 
 from src.common.config import AppConfig
 from src.common.logger import get_logger
@@ -86,10 +85,10 @@ class PathManager:
     def __init__(
         self,
         config: AppConfig,
-        run_id: Optional[str] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-        base_dir: Optional[Union[str, Path]] = None,
+        run_id: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        base_dir: str | Path | None = None,
     ) -> None:
         self._config = config
         self.symbol = config.strategy.ticker.upper()
@@ -373,24 +372,6 @@ class PathManager:
     def execution_log(self) -> Path:
         """Per-experiment execution log: ``{logs_dir}/execution.log``"""
         return self.logs_dir / "execution.log"
-
-    @property
-    def raw_candlestick_plots_dir(self) -> Path:
-        p = self.plots_dir / "candlesticks" / "raw"
-        p.mkdir(parents=True, exist_ok=True)
-        return p
-
-    @property
-    def cleaned_candlestick_plots_dir(self) -> Path:
-        p = self.plots_dir / "candlesticks" / "cleaned"
-        p.mkdir(parents=True, exist_ok=True)
-        return p
-
-    @property
-    def processed_candlestick_plots_dir(self) -> Path:
-        p = self.plots_dir / "candlesticks" / "processed"
-        p.mkdir(parents=True, exist_ok=True)
-        return p
 
     def candlestick_file(self, session_id: str) -> Path:
         """Return the path for a session candlestick chart PNG.

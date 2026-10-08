@@ -23,11 +23,11 @@ import pytest
 from src.backtest.engine import BacktestEngine
 from src.common.config import (
     AppConfig,
-    StrategyConfig,
-    FiltersConfig,
     DataConfig,
     ExecutionConfig,
+    FiltersConfig,
     OutputConfig,
+    StrategyConfig,
 )
 from src.evaluation.metrics import calculate_trade_metrics
 
@@ -85,19 +85,21 @@ def _eod_fixture_bars() -> pd.DataFrame:
     lows[16:] = 501.0
 
     idx = np.arange(n)
-    return pd.DataFrame({
-        "session_id": np.full(n, date_str),
-        "timestamp": ts,
-        "open": opens,
-        "high": highs,
-        "low": lows,
-        "close": closes,
-        "volume": volumes,
-        "minute_of_day": idx.astype(np.int32),
-        "is_opening_range": idx < 15,
-        "is_trading_window": (idx >= 15),
-        "is_force_exit": np.zeros(n, dtype=bool),
-    })
+    return pd.DataFrame(
+        {
+            "session_id": np.full(n, date_str),
+            "timestamp": ts,
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": volumes,
+            "minute_of_day": idx.astype(np.int32),
+            "is_opening_range": idx < 15,
+            "is_trading_window": (idx >= 15),
+            "is_force_exit": np.zeros(n, dtype=bool),
+        }
+    )
 
 
 def test_eod_fallback_reconciles_capital_and_equity():
@@ -138,19 +140,21 @@ def _session_frame(n=30, date_str="2024-01-02"):
     open_et = pd.Timestamp(f"{date_str} 09:30:00", tz="America/New_York")
     ts = pd.date_range(start=open_et, periods=n, freq="1min")
     idx = np.arange(n)
-    return pd.DataFrame({
-        "session_id": np.full(n, date_str),
-        "timestamp": ts,
-        "open": np.full(n, 500.0),
-        "high": np.full(n, 500.5),
-        "low": np.full(n, 499.5),
-        "close": np.full(n, 500.0),
-        "volume": np.full(n, 1000.0),
-        "minute_of_day": idx.astype(np.int32),
-        "is_opening_range": idx < 15,
-        "is_trading_window": idx >= 15,
-        "is_force_exit": np.zeros(n, dtype=bool),
-    })
+    return pd.DataFrame(
+        {
+            "session_id": np.full(n, date_str),
+            "timestamp": ts,
+            "open": np.full(n, 500.0),
+            "high": np.full(n, 500.5),
+            "low": np.full(n, 499.5),
+            "close": np.full(n, 500.0),
+            "volume": np.full(n, 1000.0),
+            "minute_of_day": idx.astype(np.int32),
+            "is_opening_range": idx < 15,
+            "is_trading_window": idx >= 15,
+            "is_force_exit": np.zeros(n, dtype=bool),
+        }
+    )
 
 
 def _set_or(df):
@@ -162,8 +166,7 @@ def _set_or(df):
 def _assert_reconciles(result, cfg):
     last_equity = float(result.equity_curve["equity"].iloc[-1])
     assert result.final_capital == pytest.approx(
-        cfg.execution.initial_capital
-        + sum(t.pnl_dollars for t in result.trades)
+        cfg.execution.initial_capital + sum(t.pnl_dollars for t in result.trades)
     )
     assert abs(last_equity - result.final_capital) <= 0.01
     return last_equity

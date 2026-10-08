@@ -54,10 +54,10 @@ Usage
 from __future__ import annotations
 
 import os
+import re
 import time
 from datetime import datetime, timezone
-from typing import Optional
-import re
+
 import pandas as pd
 from dotenv import load_dotenv
 
@@ -164,8 +164,8 @@ def _get_feed_enum(feed_str: str) -> object:
 
 
 def _load_credentials(
-    api_key: Optional[str],
-    secret_key: Optional[str],
+    api_key: str | None,
+    secret_key: str | None,
     is_paper: bool,
 ) -> tuple[str, str]:
     """Resolve Alpaca API credentials from arguments or environment.
@@ -205,8 +205,8 @@ def _load_credentials(
             "Set them in your .env file or as environment variables.",
         )
 
-    # Log key prefix only — never log the full secret
-    logger.debug("Alpaca credentials loaded. Key prefix: %s***", api_key[:4])
+    # Credentials verified — never log credentials or fragments
+    logger.debug("Alpaca credentials loaded successfully.")
     return api_key, secret_key
 
 
@@ -315,8 +315,8 @@ class AlpacaDataClient:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        secret_key: Optional[str] = None,
+        api_key: str | None = None,
+        secret_key: str | None = None,
         is_paper: bool = True,
         max_retries: int = _MAX_RETRIES,
         backoff_base: float = _BACKOFF_BASE_SECONDS,
@@ -348,8 +348,8 @@ class AlpacaDataClient:
     def fetch_bars(
         self,
         symbol: str = "SPY",
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
         timeframe: str = "1Min",
         feed: str = "iex",
     ) -> pd.DataFrame:
@@ -418,14 +418,12 @@ class AlpacaDataClient:
         )
 
         # ── Retry loop ───────────────────────────────────────────────
-        last_exc: Optional[Exception] = None
         for attempt in range(1, self._max_retries + 1):
             try:
                 bars = self._client.get_stock_bars(request)
                 raw_df: pd.DataFrame = bars.df
                 break  # success
             except Exception as exc:
-                last_exc = exc
                 exc_str = str(exc)
 
                 is_rate_limit = "429" in exc_str or "rate limit" in exc_str.lower()
@@ -436,7 +434,8 @@ class AlpacaDataClient:
 
                 if not is_transient or attempt == self._max_retries:
                     raise DataFetchError(
-                        f"Alpaca API request failed (attempt {attempt}/{self._max_retries}): {exc}",
+                        f"Alpaca API request failed "
+                        f"(attempt {attempt}/{self._max_retries}): {exc}",
                         ticker=symbol,
                         start_date=start_date.strftime("%Y-%m-%d"),
                         end_date=end_date.strftime("%Y-%m-%d"),

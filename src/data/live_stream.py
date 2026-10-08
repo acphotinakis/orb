@@ -12,8 +12,8 @@ requested -- never at import or at class definition time.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Callable, Iterator, List, Optional, Set
 
 import pandas as pd
 
@@ -32,6 +32,7 @@ class RawBar:
         revision: 0 = initial; >0 = correction.
         is_final: True once the finalization window has elapsed.
     """
+
     symbol: str
     feed: str
     bar_start: pd.Timestamp
@@ -56,10 +57,11 @@ class StreamEvent:
         bar: RawBar payload (only when kind==bar).
         message: Error/status text, already redacted of credentials.
     """
+
     kind: str
     received_at: pd.Timestamp
-    bar: Optional[RawBar] = None
-    message: Optional[str] = None
+    bar: RawBar | None = None
+    message: str | None = None
 
 
 class StreamAdapter(ABC):
@@ -91,12 +93,12 @@ class StreamAdapter(ABC):
 
     @property
     @abstractmethod
-    def last_heartbeat_at(self) -> Optional[pd.Timestamp]:
+    def last_heartbeat_at(self) -> pd.Timestamp | None:
         """Wall-clock time of the most recent heartbeat, or None."""
 
     @property
     @abstractmethod
-    def last_bar_at(self) -> Optional[pd.Timestamp]:
+    def last_bar_at(self) -> pd.Timestamp | None:
         """Market bar_start of last received bar, or None.
         Heartbeats must NOT update this property (P5-A5).
         """
@@ -117,27 +119,27 @@ class FakeStreamAdapter(StreamAdapter):
 
     def __init__(
         self,
-        bars: List[RawBar],
+        bars: list[RawBar],
         *,
-        clock: Optional[Callable[[], pd.Timestamp]] = None,
-        drop_indices: Optional[Set[int]] = None,
-        disconnect_after: Optional[int] = None,
-        duplicate_indices: Optional[Set[int]] = None,
+        clock: Callable[[], pd.Timestamp] | None = None,
+        drop_indices: set[int] | None = None,
+        disconnect_after: int | None = None,
+        duplicate_indices: set[int] | None = None,
         heartbeat_every: int = 30,
     ) -> None:
         self._bars = bars
         self._clock: Callable[[], pd.Timestamp] = (
             clock if clock is not None else (lambda: pd.Timestamp.now(tz="UTC"))
         )
-        self._drop_indices: Set[int] = drop_indices or set()
-        self._disconnect_after: Optional[int] = disconnect_after
-        self._duplicate_indices: Set[int] = duplicate_indices or set()
+        self._drop_indices: set[int] = drop_indices or set()
+        self._disconnect_after: int | None = disconnect_after
+        self._duplicate_indices: set[int] = duplicate_indices or set()
         self._heartbeat_every: int = heartbeat_every
         self._stopped: bool = False
         self._connection_state: str = "connecting"
-        self._last_heartbeat_at: Optional[pd.Timestamp] = None
-        self._last_bar_at: Optional[pd.Timestamp] = None
-        self._subscriptions: Set[tuple] = set()
+        self._last_heartbeat_at: pd.Timestamp | None = None
+        self._last_bar_at: pd.Timestamp | None = None
+        self._subscriptions: set[tuple] = set()
 
     def subscribe(self, symbol: str, feed: str, timeframe: str) -> None:
         self._subscriptions.add((symbol, feed, timeframe))
@@ -207,7 +209,9 @@ class FakeStreamAdapter(StreamAdapter):
             ):
                 now = self._clock()
                 self._last_heartbeat_at = now
-                yield StreamEvent(kind="heartbeat", received_at=now, message="heartbeat")
+                yield StreamEvent(
+                    kind="heartbeat", received_at=now, message="heartbeat"
+                )
                 if self._stopped:
                     return
 
@@ -235,11 +239,11 @@ class FakeStreamAdapter(StreamAdapter):
         return self._connection_state
 
     @property
-    def last_heartbeat_at(self) -> Optional[pd.Timestamp]:
+    def last_heartbeat_at(self) -> pd.Timestamp | None:
         return self._last_heartbeat_at
 
     @property
-    def last_bar_at(self) -> Optional[pd.Timestamp]:
+    def last_bar_at(self) -> pd.Timestamp | None:
         return self._last_bar_at
 
 
@@ -249,10 +253,10 @@ def make_fake_bars(
     total_bars: int = 390,
     or_high: float = 502.0,
     or_low: float = 498.0,
-    breakout_bar: Optional[int] = None,
+    breakout_bar: int | None = None,
     breakout_direction: str = "LONG",
     base_price: float = 500.0,
-) -> List[RawBar]:
+) -> list[RawBar]:
     """Generate a deterministic full RTH session of 1-minute RawBars for testing.
 
     OR bars (first or_minutes): prices oscillate between or_low and or_high.
@@ -277,7 +281,7 @@ def make_fake_bars(
     session_open = pd.Timestamp(f"{session_id} 09:30:00", tz=tz)
     fixed_received_at = pd.Timestamp(f"{session_id} 14:30:00", tz="UTC")
 
-    bars: List[RawBar] = []
+    bars: list[RawBar] = []
     for i in range(total_bars):
         bar_start = session_open + pd.Timedelta(minutes=i)
         bar_end = bar_start + pd.Timedelta(minutes=1)
@@ -313,19 +317,21 @@ def make_fake_bars(
                 open_ = base_price
                 high = base_price + 0.1
 
-        bars.append(RawBar(
-            symbol="SPY",
-            feed="sip",
-            bar_start=bar_start,
-            bar_end=bar_end,
-            open=open_,
-            high=high,
-            low=low,
-            close=close,
-            volume=10_000.0,
-            received_at=fixed_received_at,
-            revision=0,
-            is_final=True,
-        ))
+        bars.append(
+            RawBar(
+                symbol="SPY",
+                feed="sip",
+                bar_start=bar_start,
+                bar_end=bar_end,
+                open=open_,
+                high=high,
+                low=low,
+                close=close,
+                volume=10_000.0,
+                received_at=fixed_received_at,
+                revision=0,
+                is_final=True,
+            )
+        )
 
     return bars

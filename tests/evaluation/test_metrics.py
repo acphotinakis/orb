@@ -5,23 +5,20 @@ Tests for src.evaluation.metrics
 Unit tests for the performance metrics calculation functions.
 """
 
-import math
-import numpy as np
 import pandas as pd
-from unittest.mock import Mock
 
-from src.evaluation.metrics import (
-    calculate_trade_metrics,
-    calculate_portfolio_metrics,
-    generate_performance_report
-)
 from src.common.config import (
     AppConfig,
-    StrategyConfig,
-    FiltersConfig,
     DataConfig,
     ExecutionConfig,
+    FiltersConfig,
     OutputConfig,
+    StrategyConfig,
+)
+from src.evaluation.metrics import (
+    calculate_portfolio_metrics,
+    calculate_trade_metrics,
+    generate_performance_report,
 )
 
 
@@ -67,14 +64,16 @@ def test_calculate_trade_metrics_empty_dataframe():
 
 def test_calculate_trade_metrics_all_wins():
     """Test trade metrics calculation with all winning trades."""
-    trades_df = pd.DataFrame({
-        "direction": ["LONG", "SHORT", "LONG"],
-        "pnl_dollars": [100.0, 200.0, 150.0],
-        "r_multiple": [2.0, 3.0, 2.5],
-        "exit_reason": ["TARGET", "TARGET", "STOP"],
-        "slippage_paid": [0.0, 0.0, 0.0],
-        "commission_paid": [0.0, 0.0, 0.0],
-    })
+    trades_df = pd.DataFrame(
+        {
+            "direction": ["LONG", "SHORT", "LONG"],
+            "pnl_dollars": [100.0, 200.0, 150.0],
+            "r_multiple": [2.0, 3.0, 2.5],
+            "exit_reason": ["TARGET", "TARGET", "STOP"],
+            "slippage_paid": [0.0, 0.0, 0.0],
+            "commission_paid": [0.0, 0.0, 0.0],
+        }
+    )
 
     result = calculate_trade_metrics(trades_df)
 
@@ -102,14 +101,16 @@ def test_calculate_trade_metrics_all_wins():
 
 def test_calculate_trade_metrics_all_losses():
     """Test trade metrics calculation with all losing trades."""
-    trades_df = pd.DataFrame({
-        "direction": ["LONG", "SHORT", "LONG"],
-        "pnl_dollars": [-100.0, -200.0, -150.0],
-        "r_multiple": [-2.0, -3.0, -2.5],
-        "exit_reason": ["STOP", "STOP", "EOD"],
-        "slippage_paid": [0.0, 0.0, 0.0],
-        "commission_paid": [0.0, 0.0, 0.0],
-    })
+    trades_df = pd.DataFrame(
+        {
+            "direction": ["LONG", "SHORT", "LONG"],
+            "pnl_dollars": [-100.0, -200.0, -150.0],
+            "r_multiple": [-2.0, -3.0, -2.5],
+            "exit_reason": ["STOP", "STOP", "EOD"],
+            "slippage_paid": [0.0, 0.0, 0.0],
+            "commission_paid": [0.0, 0.0, 0.0],
+        }
+    )
 
     result = calculate_trade_metrics(trades_df)
 
@@ -137,14 +138,16 @@ def test_calculate_trade_metrics_all_losses():
 
 def test_calculate_trade_metrics_mixed():
     """Test trade metrics calculation with mixed win/loss trades."""
-    trades_df = pd.DataFrame({
-        "direction": ["LONG", "SHORT", "LONG", "SHORT"],
-        "pnl_dollars": [100.0, -50.0, 200.0, -100.0],
-        "r_multiple": [2.0, -1.0, 4.0, -2.0],
-        "exit_reason": ["TARGET", "STOP", "TARGET", "EOD"],
-        "slippage_paid": [0.0, 0.0, 0.0, 0.0],
-        "commission_paid": [0.0, 0.0, 0.0, 0.0],
-    })
+    trades_df = pd.DataFrame(
+        {
+            "direction": ["LONG", "SHORT", "LONG", "SHORT"],
+            "pnl_dollars": [100.0, -50.0, 200.0, -100.0],
+            "r_multiple": [2.0, -1.0, 4.0, -2.0],
+            "exit_reason": ["TARGET", "STOP", "TARGET", "EOD"],
+            "slippage_paid": [0.0, 0.0, 0.0, 0.0],
+            "commission_paid": [0.0, 0.0, 0.0, 0.0],
+        }
+    )
 
     result = calculate_trade_metrics(trades_df)
 
@@ -157,7 +160,9 @@ def test_calculate_trade_metrics_mixed():
     assert result["total_realized_r"] == 3.0
     assert result["avg_r"] == 0.75
     assert result["median_r"] == 0.5  # median(-2, -1, 2, 4) = (-1 + 2) / 2
-    assert result["expectancy_r"] == 0.75  # (0.5 * 3.0) - (0.5 * 1.5) = 1.5 - 0.75 = 0.75
+    assert (
+        result["expectancy_r"] == 0.75
+    )  # (0.5 * 3.0) - (0.5 * 1.5) = 1.5 - 0.75 = 0.75
     assert result["avg_win_dollars"] == 150.0
     assert result["avg_loss_dollars"] == 75.0
     assert result["payoff_ratio"] == 2.0
@@ -173,14 +178,16 @@ def test_calculate_trade_metrics_mixed():
 
 def test_calculate_trade_metrics_scratch_trades():
     """Test trade metrics calculation with scratch trades."""
-    trades_df = pd.DataFrame({
-        "direction": ["LONG", "SHORT", "LONG", "SHORT"],
-        "pnl_dollars": [100.0, 0.0, 200.0, -100.0],
-        "r_multiple": [2.0, 0.0, 4.0, -2.0],
-        "exit_reason": ["TARGET", "STOP", "TARGET", "EOD"],
-        "slippage_paid": [0.0, 0.0, 0.0, 0.0],
-        "commission_paid": [0.0, 0.0, 0.0, 0.0],
-    })
+    trades_df = pd.DataFrame(
+        {
+            "direction": ["LONG", "SHORT", "LONG", "SHORT"],
+            "pnl_dollars": [100.0, 0.0, 200.0, -100.0],
+            "r_multiple": [2.0, 0.0, 4.0, -2.0],
+            "exit_reason": ["TARGET", "STOP", "TARGET", "EOD"],
+            "slippage_paid": [0.0, 0.0, 0.0, 0.0],
+            "commission_paid": [0.0, 0.0, 0.0, 0.0],
+        }
+    )
 
     result = calculate_trade_metrics(trades_df)
 
@@ -193,7 +200,9 @@ def test_calculate_trade_metrics_scratch_trades():
     assert result["total_realized_r"] == 4.0
     assert result["avg_r"] == 1.0
     assert result["median_r"] == 1.0  # median(-2, 0, 2, 4) = (0 + 2) / 2
-    assert result["expectancy_r"] == 0.5  # E_R = W*avg_win - (1-W)*avg_loss = 0.5*3.0 - 0.5*2.0
+    assert (
+        result["expectancy_r"] == 0.5
+    )  # E_R = W*avg_win - (1-W)*avg_loss = 0.5*3.0 - 0.5*2.0
     assert result["avg_win_dollars"] == 150.0
     assert result["avg_loss_dollars"] == 100.0
     assert result["payoff_ratio"] == 1.5
@@ -253,9 +262,19 @@ def test_calculate_portfolio_metrics_single_equity():
 
 def test_calculate_portfolio_metrics_with_drawdown():
     """Test portfolio metrics calculation with drawdown."""
-    equity_df = pd.DataFrame({
-        "equity": [100000.0, 110000.0, 120000.0, 110000.0, 100000.0, 90000.0, 100000.0]
-    })
+    equity_df = pd.DataFrame(
+        {
+            "equity": [
+                100000.0,
+                110000.0,
+                120000.0,
+                110000.0,
+                100000.0,
+                90000.0,
+                100000.0,
+            ]
+        }
+    )
 
     result = calculate_portfolio_metrics(equity_df)
 
@@ -271,9 +290,17 @@ def test_calculate_portfolio_metrics_with_drawdown():
 
 def test_calculate_portfolio_metrics_with_cagr():
     """Test portfolio metrics calculation with CAGR."""
-    equity_df = pd.DataFrame({
-        "equity": [100000.0, 110000.0, 121000.0, 133100.0, 146410.0]  # 10% annual growth over 4 years
-    })
+    equity_df = pd.DataFrame(
+        {
+            "equity": [
+                100000.0,
+                110000.0,
+                121000.0,
+                133100.0,
+                146410.0,
+            ]  # 10% annual growth over 4 years
+        }
+    )
 
     result = calculate_portfolio_metrics(equity_df)
 
@@ -286,18 +313,18 @@ def test_calculate_portfolio_metrics_with_cagr():
 
 def test_generate_performance_report():
     """Test complete performance report generation."""
-    trades_df = pd.DataFrame({
-        "direction": ["LONG", "SHORT", "LONG"],
-        "pnl_dollars": [100.0, -50.0, 200.0],
-        "r_multiple": [2.0, -1.0, 4.0],
-        "exit_reason": ["TARGET", "STOP", "TARGET"],
-        "slippage_paid": [0.0, 0.0, 0.0],
-        "commission_paid": [0.0, 0.0, 0.0],
-    })
+    trades_df = pd.DataFrame(
+        {
+            "direction": ["LONG", "SHORT", "LONG"],
+            "pnl_dollars": [100.0, -50.0, 200.0],
+            "r_multiple": [2.0, -1.0, 4.0],
+            "exit_reason": ["TARGET", "STOP", "TARGET"],
+            "slippage_paid": [0.0, 0.0, 0.0],
+            "commission_paid": [0.0, 0.0, 0.0],
+        }
+    )
 
-    equity_df = pd.DataFrame({
-        "equity": [100000.0, 105000.0, 110000.0]
-    })
+    equity_df = pd.DataFrame({"equity": [100000.0, 105000.0, 110000.0]})
 
     config = AppConfig(
         schema_version="1.0",

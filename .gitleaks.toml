@@ -1,0 +1,8 @@
+[allowlist]
+description = "Ignore local environments and untracked env files during local directory scans"
+paths = [
+    '''\.venv/''',
+    '''\.orb_venv/''',
+    '''\.env$''',
+    '''\.env\..*''',
+]

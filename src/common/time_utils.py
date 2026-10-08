@@ -37,9 +37,8 @@ Every function in this module explicitly works with timezone-aware
 from __future__ import annotations
 
 import datetime
-from enum import Enum
-from typing import Tuple
 import re
+from enum import Enum
 
 import pandas as pd
 
@@ -349,7 +348,7 @@ def get_session_timestamps(
     or_minutes: int = 15,
     force_exit_time: str = "15:59:00",
     tz: str = EASTERN_TZ,
-) -> Tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp, pd.Timestamp]:
+) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp, pd.Timestamp]:
     """Return the four canonical boundary timestamps for a single trading day.
 
     All returned timestamps are fully timezone-aware in *tz*.
@@ -450,8 +449,11 @@ def add_session_id_column(
     df_et["session_id"] = df_et[time_col].dt.strftime("%Y-%m-%d")
     return df_et
 
+
 def get_timeframe_minutes(timeframe: str) -> int:
-    """Parse minutes from timeframe string (e.g. '1Min' -> 1, '5Min' -> 5, '1Hour' -> 60)."""
+    """Parse minutes from timeframe string
+    (e.g. '1Min' -> 1, '5Min' -> 5, '1Hour' -> 60).
+    """
     tf = timeframe.strip().lower()
     if "min" in tf or "t" in tf:
         nums = re.findall(r"\d+", tf)

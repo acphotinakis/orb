@@ -37,12 +37,14 @@ import re
 import subprocess
 import tempfile
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Union
+from typing import Any
 
 import pandas as pd
+import pyarrow as pa
 
 from src.common.exceptions import ConfigurationError
 
@@ -57,7 +59,7 @@ _SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 _RESERVED_COMPONENTS = {".", ".."}
 
-_locks: Dict[str, threading.Lock] = {}
+_locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
 
@@ -100,8 +102,10 @@ def fingerprint_dataframe(df: pd.DataFrame) -> str:
             # Object arrays hash pointers with tobytes(); encode content
             # deterministically instead (length-prefixed UTF-8, null sentinel).
             for value in vals:
-                if value is None or value is pd.NA or (
-                    isinstance(value, float) and math.isnan(value)
+                if (
+                    value is None
+                    or value is pd.NA
+                    or (isinstance(value, float) and math.isnan(value))
                 ):
                     digest.update(b"\x00null\x00")
                 else:
@@ -110,18 +114,23 @@ def fingerprint_dataframe(df: pd.DataFrame) -> str:
         else:
             try:
                 digest.update(vals.tobytes())
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 digest.update(str(series.tolist()).encode("utf-8"))
+
     return digest.hexdigest()
 
 
-def source_code_fingerprint(repo_root: Optional[Path] = None) -> Dict[str, Any]:
+def source_code_fingerprint(repo_root: Path | None = None) -> dict[str, Any]:
     """Best-effort source revision record; never raises.
 
     Returns ``{"available": False, ...}`` when git is missing or fails, so
     offline/test environments keep working while provenance stays explicit.
     """
-    root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[2]
+    root = (
+        Path(repo_root)
+        if repo_root is not None
+        else Path(__file__).resolve().parents[2]
+    )
     try:
         revision = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -129,6 +138,7 @@ def source_code_fingerprint(repo_root: Optional[Path] = None) -> Dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         status = subprocess.run(
             ["git", "status", "--porcelain"],
@@ -136,6 +146,7 @@ def source_code_fingerprint(repo_root: Optional[Path] = None) -> Dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         if revision.returncode != 0:
             raise RuntimeError("git rev-parse failed")
@@ -144,7 +155,7 @@ def source_code_fingerprint(repo_root: Optional[Path] = None) -> Dict[str, Any]:
             "revision": revision.stdout.strip(),
             "dirty": bool(status.stdout.strip()),
         }
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         return {"available": False, "revision": None, "dirty": None, "error": str(exc)}
 
 
@@ -173,7 +184,7 @@ def dataset_identity(
     or_minutes: int,
     force_exit_time: str,
     processing_version: str = PROCESSING_VERSION,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build the full identity mapping for a processed dataset."""
     return {
         "processing_version": processing_version,
@@ -201,7 +212,11 @@ def identity_short_hash(identity: Mapping[str, Any]) -> str:
 
 def ensure_safe_component(value: str, *, field_name: str) -> str:
     """Validate a user-derived single path component (no traversal)."""
-    if not isinstance(value, str) or value in _RESERVED_COMPONENTS or not _SAFE_COMPONENT_RE.match(value):
+    if (
+        not isinstance(value, str)
+        or value in _RESERVED_COMPONENTS
+        or not _SAFE_COMPONENT_RE.match(value)
+    ):
         raise ConfigurationError(
             f"{field_name} must match [A-Za-z0-9._-] (no path separators); "
             f"got {value!r}.",
@@ -285,17 +300,17 @@ _REQUIRED_MANIFEST_KEYS = (
 def build_manifest(
     *,
     run_id: str,
-    run_label: Optional[str],
-    config_dict: Dict[str, Any],
-    request_dict: Dict[str, Any],
-    source_dict: Dict[str, Any],
-    datasets_dict: Dict[str, Any],
-    artifacts_dict: Dict[str, Any],
-    accounting_dict: Dict[str, Any],
+    run_label: str | None,
+    config_dict: dict[str, Any],
+    request_dict: dict[str, Any],
+    source_dict: dict[str, Any],
+    datasets_dict: dict[str, Any],
+    artifacts_dict: dict[str, Any],
+    accounting_dict: dict[str, Any],
     status: str = "succeeded",
-    created_at: Optional[str] = None,
-    completed_at: Optional[str] = None,
-) -> Dict[str, Any]:
+    created_at: str | None = None,
+    completed_at: str | None = None,
+) -> dict[str, Any]:
     """Assemble (not yet publish) a run manifest."""
     now = datetime.now(timezone.utc).isoformat()
     return {
@@ -316,7 +331,7 @@ def build_manifest(
 
 def validate_manifest(
     manifest: Mapping[str, Any], experiment_dir: Path
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Validate manifest structure and that every artifact checksums intact.
 
     Raises :class:`ConfigurationError` on any problem.  Returns a summary.
@@ -374,7 +389,14 @@ def is_run_complete(experiment_dir: Path) -> bool:
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         validate_manifest(manifest, experiment_dir)
-    except Exception:
+    except (
+        OSError,
+        json.JSONDecodeError,
+        ValueError,
+        KeyError,
+        TypeError,
+        ConfigurationError,
+    ):
         return False
     return True
 
@@ -396,8 +418,8 @@ class DiscoveredRun:
     run_id: str
     status: str
     experiment_dir: Path
-    run_label: Optional[str] = None
-    completed_at: Optional[str] = None
+    run_label: str | None = None
+    completed_at: str | None = None
     detail: str = ""
 
 
@@ -405,7 +427,7 @@ def _manifest_status(manifest: Mapping[str, Any]) -> str:
     return str(manifest.get("status", "unknown"))
 
 
-def discover_runs(storage_root: Union[Path, str]) -> list["DiscoveredRun"]:
+def discover_runs(storage_root: Path | str) -> list[DiscoveredRun]:
     """List experiment runs under ``<root>/experiments/`` without computing.
 
     * ``complete`` — valid, checksum-verified, succeeded manifest.
@@ -435,7 +457,10 @@ def discover_runs(storage_root: Union[Path, str]) -> list["DiscoveredRun"]:
                     run_id=short_id,
                     status=RUN_STATUS_LEGACY,
                     experiment_dir=child,
-                    detail="No manifest.json: predates run provenance; unsupported for browsing.",
+                    detail=(
+                        "No manifest.json: predates run provenance; "
+                        "unsupported for browsing."
+                    ),
                 )
             )
             continue
@@ -460,7 +485,7 @@ def discover_runs(storage_root: Union[Path, str]) -> list["DiscoveredRun"]:
                     detail=str(exc),
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — one bad dir never blocks discovery
+        except Exception as exc:
             found.append(
                 DiscoveredRun(
                     run_id=short_id,
@@ -487,9 +512,7 @@ class RunArtifacts:
 def _read_csv_checked(experiment_dir: Path, rel: str) -> pd.DataFrame:
     target = ensure_within_root(experiment_dir, experiment_dir / rel)
     if not target.is_file():
-        raise ConfigurationError(
-            f"Artifact '{rel}' is missing.", field="artifacts"
-        )
+        raise ConfigurationError(f"Artifact '{rel}' is missing.", field="artifacts")
     try:
         return pd.read_csv(target)
     except Exception as exc:
@@ -498,9 +521,7 @@ def _read_csv_checked(experiment_dir: Path, rel: str) -> pd.DataFrame:
         )
 
 
-def read_run_artifacts(
-    storage_root: Union[Path, str], run_id: str
-) -> RunArtifacts:
+def read_run_artifacts(storage_root: Path | str, run_id: str) -> RunArtifacts:
     """Read and validate every artifact of one completed run (read-only).
 
     Args:
@@ -560,7 +581,9 @@ def read_run_artifacts(
     try:
         import yaml as _yaml
 
-        config_snapshot = _yaml.safe_load(config_target.read_text(encoding="utf-8")) or {}
+        config_snapshot = (
+            _yaml.safe_load(config_target.read_text(encoding="utf-8")) or {}
+        )
     except Exception as exc:
         raise ConfigurationError(
             f"Artifact '{config_rel}' is unreadable: {exc}.", field="artifacts"
@@ -577,7 +600,7 @@ def read_run_artifacts(
 
 
 def read_session_bars(
-    storage_root: Union[Path, str], manifest: Mapping[str, Any], session_id: str
+    storage_root: Path | str, manifest: Mapping[str, Any], session_id: str
 ) -> pd.DataFrame:
     """Load one session's processed OHLCV bars via the manifest dataset ref.
 
@@ -601,10 +624,11 @@ def read_session_bars(
         )
     try:
         df = pd.read_parquet(target, engine="pyarrow")
-    except Exception as exc:
+    except (OSError, ValueError, pa.ArrowException) as exc:
         raise ConfigurationError(
             f"Processed dataset '{rel}' is unreadable: {exc}.", field="datasets"
-        )
+        ) from exc
+
     required = {"session_id", "timestamp", "open", "high", "low", "close"}
     missing = required - set(df.columns)
     if missing:
@@ -621,7 +645,7 @@ def read_session_bars(
 
 
 def read_trace(
-    storage_root: Union[Path, str], run_id: str
+    storage_root: Path | str, run_id: str
 ) -> tuple[Mapping[str, Any], list[Mapping[str, Any]]]:
     """Read and version-check a run's decision trace (P4).
 
@@ -633,7 +657,7 @@ def read_trace(
     from src.backtest.trace import TraceCollector
 
     try:
-        return TraceCollector.parse_jsonl(data.decode("utf-8"))
+        return TraceCollector.parse_jsonl(data.decode("utf-8"))  # type: ignore
     except ValueError:
         raise
     except Exception as exc:
@@ -655,7 +679,8 @@ DOWNLOAD_ALLOWLIST = (
 )
 
 
-def read_download_bytes(    storage_root: Union[Path, str], run_id: str, relative_path: str
+def read_download_bytes(
+    storage_root: Path | str, run_id: str, relative_path: str
 ) -> tuple[bytes, str]:
     """Return ``(bytes, filename)`` for one allowlisted artifact, unchanged."""
     from pathlib import Path as _Path
@@ -719,5 +744,5 @@ def display_value(value: Any, *, suffix: str = "") -> str:
 
 def is_synthetic_run(manifest: Mapping[str, Any]) -> bool:
     """True when the run label marks synthetic demonstration data."""
-    label = str((manifest.get("run_label") or ""))
+    label = str(manifest.get("run_label") or "")
     return "synthetic" in label.lower()

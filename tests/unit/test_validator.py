@@ -5,11 +5,10 @@ Unit tests for data validation and anomaly cleaning.
 """
 
 import pandas as pd
-import numpy as np
 import pytest
 
-from src.data.validator import validate_and_clean_bars, ValidationReport
 from src.common.exceptions import DataValidationError
+from src.data.validator import validate_and_clean_bars
 
 
 def test_validator_clean_data(synthetic_rth_bars):

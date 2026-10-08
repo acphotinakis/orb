@@ -16,12 +16,12 @@ are never a replay data source. Equal availability times are resolved by seq.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any
 
 import pandas as pd
-import math
 
 CHECKPOINT_EVERY = 5_000
 
@@ -31,18 +31,18 @@ class ReplayState:
     """Information available at one replay cursor (never future state)."""
 
     cursor: int
-    cursor_time: Optional[pd.Timestamp]
+    cursor_time: pd.Timestamp | None
     visible_bars: pd.DataFrame
-    range_observed_high: Optional[float]
-    range_observed_low: Optional[float]
+    range_observed_high: float | None
+    range_observed_low: float | None
     range_frozen: bool
-    range_frozen_high: Optional[float]
-    range_frozen_low: Optional[float]
-    open_position: Optional[Mapping[str, Any]]
-    closed_trades: Tuple[Mapping[str, Any], ...] = ()
+    range_frozen_high: float | None
+    range_frozen_low: float | None
+    open_position: Mapping[str, Any] | None
+    closed_trades: tuple[Mapping[str, Any], ...] = ()
     realized_pnl: float = 0.0
     equity: pd.DataFrame = field(default_factory=pd.DataFrame)
-    decision: Optional[Mapping[str, Any]] = None
+    decision: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -50,13 +50,13 @@ class ReplayCheckpoint:
     """Lightweight resume point bounding seek work (P4-A7)."""
 
     cursor: int
-    cursor_time: Optional[pd.Timestamp]
-    open_position: Optional[Mapping[str, Any]]
-    closed_trades: Tuple[Mapping[str, Any], ...] = ()
+    cursor_time: pd.Timestamp | None
+    open_position: Mapping[str, Any] | None
+    closed_trades: tuple[Mapping[str, Any], ...] = ()
     realized_pnl: float = 0.0
 
 
-def _parse_time(value: Any) -> Optional[pd.Timestamp]:
+def _parse_time(value: Any) -> pd.Timestamp | None:
     if value is None:
         return None
     try:
@@ -71,14 +71,14 @@ def _or_window_end(session_date: str, or_minutes: int) -> pd.Timestamp:
 
 
 def reduce_events(
-    events: List[Mapping[str, Any]],
+    events: list[Mapping[str, Any]],
     cursor: int,
     *,
     session_bars: pd.DataFrame,
     session_id: str,
     or_minutes: int,
     bar_minutes: int,
-    start_from: Optional[ReplayCheckpoint] = None,
+    start_from: ReplayCheckpoint | None = None,
 ) -> ReplayState:
     """Reconstruct replay state by applying ``events[:cursor]`` in order.
 
@@ -96,10 +96,10 @@ def reduce_events(
     """
     cursor = max(0, min(cursor, len(events)))
     start = 0
-    open_position: Optional[Mapping[str, Any]] = None
-    closed: List[Mapping[str, Any]] = []
+    open_position: Mapping[str, Any] | None = None
+    closed: list[Mapping[str, Any]] = []
     realized = 0.0
-    cursor_time: Optional[pd.Timestamp] = None
+    cursor_time: pd.Timestamp | None = None
     if start_from is not None and 0 <= start_from.cursor <= cursor:
         start = start_from.cursor
         open_position = start_from.open_position
@@ -128,16 +128,29 @@ def reduce_events(
     # payload or use full-session derived columns in a replay-visible frame.
     applied = events[:cursor]
     observed = [e for e in applied if e.get("event_type") == "bar_observed"]
-    columns = ["timestamp", "open", "high", "low", "close", "volume",
-               "minute_of_day", "is_opening_range"]
-    visible = pd.DataFrame([
-        {"timestamp": pd.Timestamp(e["bar_start"]),
-         **{key: e.get(key) for key in columns if key != "timestamp"}}
-        for e in observed
-    ], columns=columns)
+    columns = [
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "minute_of_day",
+        "is_opening_range",
+    ]
+    visible = pd.DataFrame(
+        [
+            {
+                "timestamp": pd.Timestamp(e["bar_start"]),
+                **{key: e.get(key) for key in columns if key != "timestamp"},
+            }
+            for e in observed
+        ],
+        columns=columns,
+    )
     freezes = [e for e in applied if e.get("event_type") == "or_frozen"]
     frozen = bool(freezes)
-    or_bars = visible.loc[visible["is_opening_range"] == True]
+    or_bars = visible.loc[visible["is_opening_range"]]
     observed_high = float(or_bars["high"].max()) if not or_bars.empty else None
     observed_low = float(or_bars["low"].min()) if not or_bars.empty else None
     frozen_high = freezes[-1].get("or_high") if freezes else None
@@ -159,19 +172,24 @@ def reduce_events(
 
 
 def build_checkpoints(
-    events: List[Mapping[str, Any]], every: int = CHECKPOINT_EVERY
-) -> List[ReplayCheckpoint]:
+    events: list[Mapping[str, Any]], every: int = CHECKPOINT_EVERY
+) -> list[ReplayCheckpoint]:
     """Sparse resume points over the event stream (position/P&L only)."""
     if every < 1:
         raise ValueError("Checkpoint interval must be positive")
     checkpoints = [
-        ReplayCheckpoint(cursor=0, cursor_time=None, open_position=None,
-                         closed_trades=(), realized_pnl=0.0)
+        ReplayCheckpoint(
+            cursor=0,
+            cursor_time=None,
+            open_position=None,
+            closed_trades=(),
+            realized_pnl=0.0,
+        )
     ]
-    open_position: Optional[Dict[str, Any]] = None
-    closed: List[Dict[str, Any]] = []
+    open_position: dict[str, Any] | None = None
+    closed: list[dict[str, Any]] = []
     realized = 0.0
-    cursor_time: Optional[pd.Timestamp] = None
+    cursor_time: pd.Timestamp | None = None
     for index, event in enumerate(events, start=1):
         available = _parse_time(event.get("available_at"))
         if available is not None and (cursor_time is None or available > cursor_time):
@@ -190,7 +208,8 @@ def build_checkpoints(
         if index % every == 0:
             checkpoints.append(
                 ReplayCheckpoint(
-                    cursor=index, cursor_time=cursor_time,
+                    cursor=index,
+                    cursor_time=cursor_time,
                     open_position=dict(open_position) if open_position else None,
                     closed_trades=tuple(dict(c) for c in closed),
                     realized_pnl=realized,
@@ -200,7 +219,7 @@ def build_checkpoints(
 
 
 def nearest_checkpoint(
-    checkpoints: List[ReplayCheckpoint], cursor: int
+    checkpoints: list[ReplayCheckpoint], cursor: int
 ) -> ReplayCheckpoint:
     """Greatest checkpoint at or before *cursor* (cursor 0 always exists)."""
     best = checkpoints[0]
@@ -211,8 +230,8 @@ def nearest_checkpoint(
 
 
 def filter_session_events(
-    events: List[Mapping[str, Any]], session_id: str
-) -> List[Mapping[str, Any]]:
+    events: list[Mapping[str, Any]], session_id: str
+) -> list[Mapping[str, Any]]:
     """Trace events for one session, preserving sequence order."""
     return [e for e in events if e.get("session_id") == session_id]
 
@@ -225,27 +244,38 @@ class Playback:
     next_due: float = 0.0
 
 
-def playback_action(state: Playback, action: str, total: int, now: float,
-                    value: float | None = None) -> Playback:
+def playback_action(
+    state: Playback, action: str, total: int, now: float, value: float | None = None
+) -> Playback:
     """One scheduled action advances at most once; rerenders cannot catch up."""
     from dataclasses import replace
+
     if action == "reset":
         return Playback(speed=state.speed)
     if action == "pause":
         return replace(state, playing=False)
     if action == "play":
-        return replace(state, playing=state.cursor < total, next_due=now + 1 / state.speed)
+        return replace(
+            state, playing=state.cursor < total, next_due=now + 1 / state.speed
+        )
     if action == "speed":
         if value not in (0.5, 1.0, 2.0, 4.0, 8.0):
             raise ValueError("Unsupported playback speed")
         return replace(state, speed=value, next_due=now + 1 / value)
     if action in ("step", "seek"):
-        cursor = min(total, max(0, state.cursor + 1 if action == "step" else int(value)))
+        cursor = min(
+            total, max(0, state.cursor + 1 if action == "step" else int(value))
+        )
         return replace(state, cursor=cursor, playing=False)
     if action == "tick":
         if state.playing and now >= state.next_due:
             cursor = min(total, state.cursor + 1)
-            return replace(state, cursor=cursor, playing=cursor < total, next_due=now + 1 / state.speed)
+            return replace(
+                state,
+                cursor=cursor,
+                playing=cursor < total,
+                next_due=now + 1 / state.speed,
+            )
         return state
     raise ValueError("Unknown playback action")
 
@@ -257,8 +287,8 @@ class ReplayIndex:
     history per checkpoint. Checkpoints retain only range/position/P&L scalars.
     Presentation copies only the requested prefix (or a bounded chart tail).
     """
+
     def __init__(self, events, every=1000):
-        from bisect import bisect_right
         if every < 1:
             raise ValueError("Checkpoint interval must be positive")
         self.events = tuple(events)
@@ -272,42 +302,91 @@ class ReplayIndex:
             kind = event["event_type"]
             if kind == "bar_observed":
                 self.bar_at.append(cursor)
-                bars.append({"timestamp": pd.Timestamp(event["bar_start"]),
-                             **{k: event[k] for k in ("open", "high", "low", "close", "volume",
-                                                     "minute_of_day", "is_opening_range")}})
+                bars.append(
+                    {
+                        "timestamp": pd.Timestamp(event["bar_start"]),
+                        **{
+                            k: event[k]
+                            for k in (
+                                "open",
+                                "high",
+                                "low",
+                                "close",
+                                "volume",
+                                "minute_of_day",
+                                "is_opening_range",
+                            )
+                        },
+                    }
+                )
             elif kind == "trade_closed":
                 self.trade_at.append(cursor)
                 trades.append(dict(event))
             elif kind == "equity_mark":
                 self.equity_at.append(cursor)
-                equity.append({"timestamp": pd.Timestamp(event["bar_start"]),
-                               "session_id": event["session_id"],
-                               **{k: event[k] for k in ("cash", "position_value", "equity")}})
+                equity.append(
+                    {
+                        "timestamp": pd.Timestamp(event["bar_start"]),
+                        "session_id": event["session_id"],
+                        **{k: event[k] for k in ("cash", "position_value", "equity")},
+                    }
+                )
             if cursor % every == 0:
                 self.checkpoints[cursor] = scalar.copy()
-        self.bars = pd.DataFrame(bars, columns=["timestamp", "open", "high", "low", "close", "volume",
-                                               "minute_of_day", "is_opening_range"])
+        self.bars = pd.DataFrame(
+            bars,
+            columns=[
+                "timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "minute_of_day",
+                "is_opening_range",
+            ],
+        )
         self.trades = tuple(trades)
-        self.equity = pd.DataFrame(equity, columns=["timestamp", "session_id", "cash", "position_value", "equity"])
+        self.equity = pd.DataFrame(
+            equity,
+            columns=["timestamp", "session_id", "cash", "position_value", "equity"],
+        )
 
     @staticmethod
     def _empty():
-        return dict(time=None, position=None, pnl=0.0, high=None, low=None,
-                    frozen=False, frozen_high=None, frozen_low=None, decision=None)
+        return dict(
+            time=None,
+            position=None,
+            pnl=0.0,
+            high=None,
+            low=None,
+            frozen=False,
+            frozen_high=None,
+            frozen_low=None,
+            decision=None,
+        )
 
     @staticmethod
     def _apply(s, event):
         s["time"] = _parse_time(event.get("available_at")) or s["time"]
         kind = event["event_type"]
         if kind == "bar_observed" and event["is_opening_range"]:
-            s["high"] = event["high"] if s["high"] is None else max(s["high"], event["high"])
+            s["high"] = (
+                event["high"] if s["high"] is None else max(s["high"], event["high"])
+            )
             s["low"] = event["low"] if s["low"] is None else min(s["low"], event["low"])
         elif kind == "or_frozen":
-            s.update(frozen=True, frozen_high=event.get("or_high"), frozen_low=event.get("or_low"))
+            s.update(
+                frozen=True,
+                frozen_high=event.get("or_high"),
+                frozen_low=event.get("or_low"),
+            )
         elif kind == "trade_opened":
             s["position"] = dict(event)
         elif kind == "trade_closed":
-            if s["position"] is not None and s["position"].get("trade_id") == event.get("trade_id"):
+            if s["position"] is not None and s["position"].get("trade_id") == event.get(
+                "trade_id"
+            ):
                 s["position"] = None
             s["pnl"] += float(event.get("pnl_dollars", 0))
         if event.get("rule_id"):
@@ -315,6 +394,7 @@ class ReplayIndex:
 
     def seek(self, cursor: int, max_bars: int | None = None) -> ReplayState:
         from bisect import bisect_right
+
         cursor = max(0, min(len(self.events), cursor))
         start = cursor // self.every * self.every
         scalar = self.checkpoints[start].copy()
@@ -323,11 +403,19 @@ class ReplayIndex:
         n = bisect_right(self.bar_at, cursor)
         first = max(0, n - max_bars) if max_bars is not None else 0
         return ReplayState(
-            cursor, scalar["time"], self.bars.iloc[first:n].copy(),
-            scalar["high"], scalar["low"], scalar["frozen"],
-            scalar["frozen_high"], scalar["frozen_low"], scalar["position"],
-            self.trades[:bisect_right(self.trade_at, cursor)], scalar["pnl"],
-            self.equity.iloc[:bisect_right(self.equity_at, cursor)].copy(), scalar["decision"],
+            cursor,
+            scalar["time"],
+            self.bars.iloc[first:n].copy(),
+            scalar["high"],
+            scalar["low"],
+            scalar["frozen"],
+            scalar["frozen_high"],
+            scalar["frozen_low"],
+            scalar["position"],
+            self.trades[: bisect_right(self.trade_at, cursor)],
+            scalar["pnl"],
+            self.equity.iloc[: bisect_right(self.equity_at, cursor)].copy(),
+            scalar["decision"],
         )
 
 
@@ -338,9 +426,9 @@ class ReplayIndex:
 
 def diff_configs(
     config_a: Mapping[str, Any], config_b: Mapping[str, Any], prefix: str = ""
-) -> List[Tuple[str, Any, Any]]:
+) -> list[tuple[str, Any, Any]]:
     """Recursive config diff as ``(dotted_path, value_a, value_b)`` rows."""
-    rows: List[Tuple[str, Any, Any]] = []
+    rows: list[tuple[str, Any, Any]] = []
     keys = sorted(set(config_a) | set(config_b))
     for key in keys:
         path = f"{prefix}.{key}" if prefix else str(key)
@@ -350,19 +438,21 @@ def diff_configs(
         if isinstance(value_a, Mapping) and isinstance(value_b, Mapping):
             rows.extend(diff_configs(value_a, value_b, path))
         elif value_a != value_b:
-            rows.append((
-                path,
-                None if value_a is missing else value_a,
-                None if value_b is missing else value_b,
-            ))
+            rows.append(
+                (
+                    path,
+                    None if value_a is missing else value_a,
+                    None if value_b is missing else value_b,
+                )
+            )
     return rows
 
 
 def metric_deltas(
     metrics_a: Mapping[str, Any], metrics_b: Mapping[str, Any]
-) -> List[Tuple[str, str, Any, Any, Any]]:
+) -> list[tuple[str, str, Any, Any, Any]]:
     """Numeric trade/portfolio metric deltas as ``(section, key, a, b, b-a)``."""
-    rows: List[Tuple[str, str, Any, Any, Any]] = []
+    rows: list[tuple[str, str, Any, Any, Any]] = []
     for section in ("trade_metrics", "portfolio_metrics"):
         section_a = metrics_a.get(section, {}) or {}
         section_b = metrics_b.get(section, {}) or {}
@@ -377,14 +467,20 @@ def metric_deltas(
 
 def compatibility_notes(
     manifest_a: Mapping[str, Any], manifest_b: Mapping[str, Any]
-) -> List[str]:
+) -> list[str]:
     """Human-readable input-compatibility labels (never silent overlays)."""
-    notes: List[str] = []
+    notes: list[str] = []
+
     def inputs(manifest):
         datasets = manifest.get("datasets", {})
         processed = datasets.get("processed", {})
-        return {**manifest.get("config", {}).get("data", {}),
-                **datasets.get("raw", {}), **processed.get("identity", {}), **processed}
+        return {
+            **manifest.get("config", {}).get("data", {}),
+            **datasets.get("raw", {}),
+            **processed.get("identity", {}),
+            **processed,
+        }
+
     dataset_a, dataset_b = inputs(manifest_a), inputs(manifest_b)
     if manifest_a.get("source") != manifest_b.get("source"):
         notes.append("Different recorded source revisions/fingerprints.")
@@ -409,7 +505,8 @@ def compatibility_notes(
     request_a = manifest_a.get("request", {})
     request_b = manifest_b.get("request", {})
     if (request_a.get("start_date"), request_a.get("end_date")) != (
-        request_b.get("start_date"), request_b.get("end_date")
+        request_b.get("start_date"),
+        request_b.get("end_date"),
     ):
         notes.append("Different date ranges: overlay defaults to common timestamps.")
     return notes
@@ -429,9 +526,15 @@ def align_equity(
         raise ValueError("mode must be 'common' or 'full'")
     left = equity_a[["timestamp", "equity"]].rename(columns={"equity": "equity_a"})
     right = equity_b[["timestamp", "equity"]].rename(columns={"equity": "equity_b"})
-    left = left.assign(timestamp=pd.to_datetime(left.timestamp, utc=True)).drop_duplicates("timestamp", keep="last")
-    right = right.assign(timestamp=pd.to_datetime(right.timestamp, utc=True)).drop_duplicates("timestamp", keep="last")
-    merged = pd.merge(left, right, on="timestamp", how="inner" if mode == "common" else "outer")
+    left = left.assign(
+        timestamp=pd.to_datetime(left.timestamp, utc=True)
+    ).drop_duplicates("timestamp", keep="last")
+    right = right.assign(
+        timestamp=pd.to_datetime(right.timestamp, utc=True)
+    ).drop_duplicates("timestamp", keep="last")
+    merged = pd.merge(
+        left, right, on="timestamp", how="inner" if mode == "common" else "outer"
+    )
     merged = merged.sort_values("timestamp").reset_index(drop=True)
     if mode == "full":
         merged["overlap"] = merged["equity_a"].notna() & merged["equity_b"].notna()
@@ -442,7 +545,13 @@ def normalized_returns(
     aligned: pd.DataFrame, initial_a: float, initial_b: float
 ) -> pd.DataFrame:
     """Add explicitly-baselined normalized return columns (no silent policy)."""
-    if any(not isinstance(x, (int, float)) or isinstance(x, bool) or not math.isfinite(x) or x <= 0 for x in (initial_a, initial_b)):
+    if any(
+        not isinstance(x, (int, float))
+        or isinstance(x, bool)
+        or not math.isfinite(x)
+        or x <= 0
+        for x in (initial_a, initial_b)
+    ):
         raise ValueError(
             "Normalized returns require positive starting equity for both runs."
         )
@@ -457,8 +566,15 @@ def normalized_returns(
 # ---------------------------------------------------------------------------
 
 
-def read_source_excerpt(snapshot: Mapping[str, Any], module: str,
-                        function: Optional[str] = None, max_lines: int = 80) -> str:
+def read_source_excerpt(
+    snapshot: Mapping[str, Any],
+    module: str,
+    function: str | None = None,
+    max_lines: int = 80,
+) -> str:
     """Read only a verified historical snapshot; never consult the worktree."""
     from src.services.source_snapshot import historical_source
-    return "\n".join(historical_source(snapshot, module, function).splitlines()[:max_lines])
+
+    return "\n".join(
+        historical_source(snapshot, module, function).splitlines()[:max_lines]
+    )

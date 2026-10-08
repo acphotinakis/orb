@@ -14,11 +14,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-from src.common.logger import setup_logging, get_logger
 from src.common.exceptions import ORBBaseException
+from src.common.logger import get_logger, setup_logging
 from src.pipeline import ORBPipeline
 from src.services.run_models import build_run_request
 
@@ -114,7 +113,7 @@ def parse_args(args=None) -> argparse.Namespace:
     return parser.parse_args(args)
 
 
-def _build_overrides_from_args(args: argparse.Namespace) -> Dict[str, Any]:
+def _build_overrides_from_args(args: argparse.Namespace) -> dict[str, Any]:
     """Convert parsed CLI arguments into a nested override dict for ``load_config()``.
 
     Only non-None values are included so that YAML defaults are preserved when
@@ -126,7 +125,7 @@ def _build_overrides_from_args(args: argparse.Namespace) -> Dict[str, Any]:
     Returns:
         Nested dictionary mirroring the YAML config structure.
     """
-    overrides: Dict[str, Any] = {}
+    overrides: dict[str, Any] = {}
 
     if args.symbol:
         sym = args.symbol.upper()
@@ -147,7 +146,7 @@ def _build_overrides_from_args(args: argparse.Namespace) -> Dict[str, Any]:
     return overrides
 
 
-def _build_options_from_args(args: argparse.Namespace) -> Dict[str, Any]:
+def _build_options_from_args(args: argparse.Namespace) -> dict[str, Any]:
     """Convert run-control CLI flags into :func:`build_run_request` options.
 
     The legacy ``--run-id`` tag is forwarded as the user-facing ``run_label``
@@ -203,10 +202,10 @@ def main(argv=None) -> int:
         return 0
 
     except ORBBaseException as orb_err:
-        logger.error("ORB Pipeline Error: %s", orb_err, exc_info=True)
+        logger.exception("ORB Pipeline Error: %s", orb_err)
         return 1
     except Exception as exc:
-        logger.error("Fatal Unexpected Error: %s", exc, exc_info=True)
+        logger.exception("Fatal Unexpected Error: %s", exc)
         return 1
 
 

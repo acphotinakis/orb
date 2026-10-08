@@ -1,28 +1,55 @@
-.venv
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.orb_venv/
+
+# Environment variables and credentials
 .env
+.env.*
+!.env.example
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors and OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs
+*.log
+
+# Data and generated artifacts
 *.csv
 *.parquet
 *.png
-results/backtest
 
-# ── Experiment output artifacts ────────────────────────────────────────────
-# All run artifacts are stored in experiments/ and data/ — do not commit these.
-experiments/
 data/raw/
 data/processed/
-
-# Keep config, docs, and source code
-!config/
-!docs/
-!src/
-
-# Local runtime dirs (registry, demo storage) — never commit
+experiments/
+results/
+plots/
 runs/
 demo_runs/
 
-.orb_venv
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local agent artifacts
+.agents/
+AUDIT.md
 
 .agents
-
-AUDIT.md

@@ -1,10 +1,13 @@
 """Test-only network guard inherited by fresh Python worker interpreters."""
+
 import os
 import socket
 
 
 def deny_network(*args, **kwargs):
-    raise RuntimeError("Unexpected network access in offline test (including worker subprocess)")
+    raise RuntimeError(
+        "Unexpected network access in offline test (including worker subprocess)"
+    )
 
 
 def install():

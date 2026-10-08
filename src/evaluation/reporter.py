@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
 import pandas as pd
 
 from src.backtest.engine import BacktestResult
@@ -25,8 +26,8 @@ class ResultsReporter:
 
     def __init__(
         self,
-        output_dir: Optional[Path] = None,
-        base_results_dir: Optional[str] = None,
+        output_dir: Path | None = None,
+        base_results_dir: str | None = None,
     ) -> None:
         """Initialise the ResultsReporter.
 
@@ -48,9 +49,9 @@ class ResultsReporter:
     def export_all(
         self,
         backtest_result: BacktestResult,
-        metrics: Dict[str, Any],
-        run_id: Optional[str] = None,
-    ) -> Dict[str, Path]:
+        metrics: dict[str, Any],
+        run_id: str | None = None,
+    ) -> dict[str, Path]:
         """Export trades.csv, equity_curve.csv, daily_summary.csv, and metrics.json.
 
         Args:
@@ -68,7 +69,7 @@ class ResultsReporter:
         else:
             run_dir = self.output_dir
 
-        artifact_paths: Dict[str, Path] = {}
+        artifact_paths: dict[str, Path] = {}
 
         # 1. Export trades.csv
         trades_path = run_dir / "trades.csv"
@@ -119,7 +120,7 @@ class ResultsReporter:
         logger.info("Exported 4 backtest artifacts to %s", run_dir)
         return artifact_paths
 
-    def display_console_summary(self, metrics: Dict[str, Any]) -> None:
+    def display_console_summary(self, metrics: dict[str, Any]) -> None:
         """Prints a structured ASCII summary table of performance metrics to stdout."""
         tm = metrics.get("trade_metrics", {})
         pm = metrics.get("portfolio_metrics", {})
@@ -134,51 +135,68 @@ class ResultsReporter:
             return f"{value:.2f}"
 
         print("\n" + "=" * 65)
-        print(f"       OPENING RANGE BREAKOUT (ORB) PERFORMANCE REPORT       ")
+        print("       OPENING RANGE BREAKOUT (ORB) PERFORMANCE REPORT       ")
         print("=" * 65)
 
         if strat:
             print(
-                f" Target Ticker: {strat.get('ticker', 'SPY')} | OR Window: {strat.get('opening_range_minutes', 15)}m | Target: {strat.get('target_r', 2.0)}R"
+                f" Target Ticker: {strat.get('ticker', 'SPY')} | "
+                f"OR Window: {strat.get('opening_range_minutes', 15)}m | "
+                f"Target: {strat.get('target_r', 2.0)}R"
             )
             print("-" * 65)
 
         print(" [TRADE STATISTICS]")
         print(
-            f"  Total Trades:           {tm.get('total_trades', 0):<8} | Win Rate:             {tm.get('win_rate', 0.0)*100:.1f}%"
+            f"  Total Trades:           {tm.get('total_trades', 0):<8} | "
+            f"Win Rate:             {tm.get('win_rate', 0.0)*100:.1f}%"
         )
         print(
-            f"  Long Trades:            {tm.get('long_trades', 0):<8} | Short Trades:         {tm.get('short_trades', 0)}"
+            f"  Long Trades:            {tm.get('long_trades', 0):<8} | "
+            f"Short Trades:         {tm.get('short_trades', 0)}"
         )
         print(
-            f"  Win / Loss Count:       {tm.get('win_count', 0)} / {tm.get('loss_count', 0):<4} | Profit Factor:        {tm.get('profit_factor', 0.0)}"
+            f"  Win / Loss Count:       {tm.get('win_count', 0)} / "
+            f"{tm.get('loss_count', 0):<4} | "
+            f"Profit Factor:        {tm.get('profit_factor', 0.0)}"
         )
         print(
-            f"  Total Realized R:       {tm.get('total_realized_r', 0.0):<8} | Average R / Trade:    {tm.get('avg_r', 0.0):.3f}R"
+            f"  Total Realized R:       {tm.get('total_realized_r', 0.0):<8} | "
+            f"Average R / Trade:    {tm.get('avg_r', 0.0):.3f}R"
         )
         print(
-            f"  Mathematical Expectancy:{tm.get('expectancy_r', 0.0):<8} | Payoff Ratio:         {_fmt_ratio(tm.get('payoff_ratio', 0.0))}"
+            f"  Mathematical Expectancy:{tm.get('expectancy_r', 0.0):<8} | "
+            f"Payoff Ratio:         {_fmt_ratio(tm.get('payoff_ratio', 0.0))}"
         )
         print(
-            f"  Total Net P&L:          ${tm.get('total_pnl_dollars', 0.0):<8,.2f} | Best / Worst ($):    ${tm.get('best_trade_dollars', 0.0):,.0f} / ${tm.get('worst_trade_dollars', 0.0):,.0f}"
+            f"  Total Net P&L:          ${tm.get('total_pnl_dollars', 0.0):<8,.2f} | "
+            f"Best / Worst ($):    ${tm.get('best_trade_dollars', 0.0):,.0f} / "
+            f"${tm.get('worst_trade_dollars', 0.0):,.0f}"
         )
+        exit_r = tm.get("exit_reasons", {})
         print(
-            f"  Exit Breakdown:         Target: {tm.get('exit_reasons', {}).get('TARGET', 0)} | Stop: {tm.get('exit_reasons', {}).get('STOP', 0)} | EOD: {tm.get('exit_reasons', {}).get('EOD', 0)}"
+            f"  Exit Breakdown:         Target: {exit_r.get('TARGET', 0)} | "
+            f"Stop: {exit_r.get('STOP', 0)} | "
+            f"EOD: {exit_r.get('EOD', 0)}"
         )
 
         print("-" * 65)
         print(" [PORTFOLIO & RISK METRICS]")
         print(
-            f"  Initial Capital:        ${pm.get('initial_capital', 0.0):<8,.2f} | Ending Equity:        ${pm.get('ending_equity', 0.0):,.2f}"
+            f"  Initial Capital:        ${pm.get('initial_capital', 0.0):<8,.2f} | "
+            f"Ending Equity:        ${pm.get('ending_equity', 0.0):,.2f}"
         )
         print(
-            f"  Total Return:           {pm.get('total_return_pct', 0.0):<8.2f}% | Annualized (CAGR):    {pm.get('cagr_pct', 0.0):.2f}%"
+            f"  Total Return:           {pm.get('total_return_pct', 0.0):<8.2f}% | "
+            f"Annualized (CAGR):    {pm.get('cagr_pct', 0.0):.2f}%"
         )
         print(
-            f"  Sharpe Ratio:           {pm.get('sharpe_ratio', 0.0):<8.2f} | Sortino Ratio:        {pm.get('sortino_ratio', 0.0)}"
+            f"  Sharpe Ratio:           {pm.get('sharpe_ratio', 0.0):<8.2f} | "
+            f"Sortino Ratio:        {pm.get('sortino_ratio', 0.0)}"
         )
         print(
-            f"  Max Drawdown:           {pm.get('max_drawdown_pct', 0.0):<8.2f}% | Max DD ($):           ${pm.get('max_drawdown_dollars', 0.0):,.2f}"
+            f"  Max Drawdown:           {pm.get('max_drawdown_pct', 0.0):<8.2f}% | "
+            f"Max DD ($):           ${pm.get('max_drawdown_dollars', 0.0):,.2f}"
         )
         print(f"  Calmar Ratio:           {pm.get('calmar_ratio', 0.0)}")
         print("=" * 65 + "\n")

@@ -1,12 +1,11 @@
 import pandas as pd
-import datetime as dt
+
 from src.common.time_utils import (
-    to_eastern,
-    ensure_eastern,
-    filter_rth,
-    classify_session_phase,
-    SessionPhase,
     EASTERN_TZ,
+    SessionPhase,
+    classify_session_phase,
+    filter_rth,
+    to_eastern,
 )
 
 
@@ -41,4 +40,3 @@ def test_classify_session_phase():
     assert classify_session_phase(ts_trading) == SessionPhase.TRADING
     assert classify_session_phase(ts_fe) == SessionPhase.FORCE_EXIT
     assert classify_session_phase(ts_pre) == SessionPhase.PRE_MARKET
-

@@ -19,19 +19,19 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Any
+
 import pandas as pd
 
+from src.backtest.engine import BacktestEngine, BacktestResult
+from src.backtest.trace import TraceCollector
 from src.common.config import AppConfig
 from src.common.logger import get_logger, setup_logging
 from src.common.paths import PathManager
-from src.common.exceptions import ORBBaseException
-from src.data.fetcher import DataFetcher
-from src.data.validator import validate_and_clean_bars
-from src.data.processor import DataProcessor
-from src.backtest.engine import BacktestEngine, BacktestResult
-from src.backtest.trace import TraceCollector
 from src.common.time_utils import get_timeframe_minutes
+from src.data.fetcher import DataFetcher
+from src.data.processor import DataProcessor
+from src.data.validator import validate_and_clean_bars
 from src.evaluation.metrics import generate_performance_report
 from src.evaluation.reporter import ResultsReporter
 from src.visualization.candlestick_data_plotter import CandlestickDataPlotter
@@ -46,8 +46,8 @@ class PipelineRunResult:
     """Summary record returned upon successful pipeline execution."""
 
     config: AppConfig
-    metrics: Dict[str, Any]
-    artifacts: Dict[str, Path]
+    metrics: dict[str, Any]
+    artifacts: dict[str, Path]
     total_trades: int
     execution_time_seconds: float
 
@@ -58,8 +58,8 @@ class ORBPipeline:
     def __init__(
         self,
         config: AppConfig,
-        paths: Optional[PathManager] = None,
-        base_dir: Optional[Union[str, Path]] = None,
+        paths: PathManager | None = None,
+        base_dir: str | Path | None = None,
     ) -> None:
         """Initialise the pipeline with a validated config.
 
@@ -78,16 +78,16 @@ class ORBPipeline:
 
     def run(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         refresh_cache: bool = False,
         generate_plots: bool = True,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         log_level: str = "INFO",
-        base_dir: Optional[Union[str, Path]] = None,
-        run_label: Optional[str] = None,
-        on_event: Optional[callable] = None,
-        cancel_requested: Optional[callable] = None,
+        base_dir: str | Path | None = None,
+        run_label: str | None = None,
+        on_event: callable | None = None,
+        cancel_requested: callable | None = None,
         record_trace: bool = False,
     ) -> PipelineRunResult:
         """Execute the full pipeline workflow from data ingestion to reporting.
@@ -143,7 +143,7 @@ class ORBPipeline:
         )
 
         t0 = time.time()
-        artifacts: Dict[str, Path] = {}
+        artifacts: dict[str, Path] = {}
         created_at = datetime.now(timezone.utc).isoformat()
 
         if run_id is None:
@@ -184,8 +184,8 @@ class ORBPipeline:
         _emit("run_started", run_label=run_label)
 
         # ── Parse date bounds ─────────────────────────────────────────
-        s_dt: Optional[datetime] = None
-        e_dt: Optional[datetime] = None
+        s_dt: datetime | None = None
+        e_dt: datetime | None = None
         if start_date:
             s_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(
                 tzinfo=timezone.utc
@@ -240,7 +240,6 @@ class ORBPipeline:
         )
         engine = BacktestEngine(config=self.config)
         reporter = ResultsReporter(output_dir=paths.results_dir)
-        data_plotter = CandlestickDataPlotter(output_dir=paths.candlestick_plots_dir)
         trade_plotter = CandlestickTradePlotter(output_dir=paths.trade_plots_dir)
         perf_plotter = PerformancePlotter(
             equity_dir=paths.equity_curves_dir,
@@ -249,7 +248,7 @@ class ORBPipeline:
         )
 
         # ── Initialize artifacts container upfront ────────────────────
-        artifacts: Dict[str, Path] = {}
+        artifacts: dict[str, Path] = {}
 
         # ── Step 1: Data Ingestion ────────────────────────────────────
         _check_cancel("fetch")
@@ -375,7 +374,9 @@ class ORBPipeline:
         source_snapshot = capture_source_snapshot() if record_trace else None
         collector = TraceCollector() if record_trace else None
         backtest_result: BacktestResult = engine.run(
-            processed_df, progress=_engine_event, cancel_requested=cancel_requested,
+            processed_df,
+            progress=_engine_event,
+            cancel_requested=cancel_requested,
             trace=collector,
         )
         if backtest_result.cancelled:
@@ -408,17 +409,23 @@ class ORBPipeline:
         # Captured from the executing engine above; written before the
         # manifest so it is checksummed like every other artifact.
         if collector is not None:
-            from src.services.artifact_store import atomic_write_text
-
             import json
 
+            from src.services.artifact_store import atomic_write_text
+
             snapshot_path = paths.results_dir / "source_snapshot.json"
-            atomic_write_text(snapshot_path, json.dumps(source_snapshot, sort_keys=True))
+            atomic_write_text(
+                snapshot_path, json.dumps(source_snapshot, sort_keys=True)
+            )
             artifacts["source_snapshot"] = snapshot_path
             trace_path = paths.results_dir / "decision_trace.jsonl"
             atomic_write_text(
-                trace_path, collector.to_jsonl(run_id=run_id, initial_capital=self.config.execution.initial_capital,
-                                                 bar_minutes=get_timeframe_minutes(self.config.data.timeframe))
+                trace_path,
+                collector.to_jsonl(
+                    run_id=run_id,
+                    initial_capital=self.config.execution.initial_capital,
+                    bar_minutes=get_timeframe_minutes(self.config.data.timeframe),
+                ),
             )
             artifacts["decision_trace"] = trace_path
             logger.info(
@@ -448,7 +455,7 @@ class ORBPipeline:
         # leaves no manifest, so incomplete runs can never look complete.
         logger.info("Verifying artifacts and publishing manifest...")
         experiment_dir = paths.experiment_dir
-        artifact_entries: Dict[str, Dict[str, Any]] = {}
+        artifact_entries: dict[str, dict[str, Any]] = {}
         for sub in ("results", "plots"):
             subdir = experiment_dir / sub
             if subdir.is_dir():
@@ -470,10 +477,14 @@ class ORBPipeline:
                 }
 
         processed_fingerprint = fingerprint_dataframe(processed_df)
-        net_pnl = float(backtest_result.trades_df["pnl_dollars"].sum()) if (
-            not backtest_result.trades_df.empty
-            and "pnl_dollars" in backtest_result.trades_df.columns
-        ) else 0.0
+        net_pnl = (
+            float(backtest_result.trades_df["pnl_dollars"].sum())
+            if (
+                not backtest_result.trades_df.empty
+                and "pnl_dollars" in backtest_result.trades_df.columns
+            )
+            else 0.0
+        )
         manifest = build_manifest(
             run_id=run_id,
             run_label=run_label,
@@ -500,9 +511,11 @@ class ORBPipeline:
                 "processed": {
                     "identity": identity,
                     "identity_hash": identity_hash,
-                    "path": processed_file.relative_to(paths.root_dir).as_posix()
-                    if processed_file.is_relative_to(paths.root_dir)
-                    else str(processed_file),
+                    "path": (
+                        processed_file.relative_to(paths.root_dir).as_posix()
+                        if processed_file.is_relative_to(paths.root_dir)
+                        else str(processed_file)
+                    ),
                     "fingerprint": processed_fingerprint,
                     "rows": len(processed_df),
                     "sessions": int(processed_df["session_id"].nunique()),

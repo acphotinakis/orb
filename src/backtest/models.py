@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict
+from typing import Any
+
 import pandas as pd
 
 
@@ -57,7 +58,7 @@ class Trade:
     slippage_paid: float
     commission_paid: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert trade record to clean dictionary for DataFrame/CSV export."""
         return {
             "trade_id": self.trade_id,

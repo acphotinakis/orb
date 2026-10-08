@@ -10,14 +10,15 @@ Sortino, Calmar, and high-water mark drawdowns matching the Section 5.2 metrics 
 from __future__ import annotations
 
 import math
-from typing import Any, Dict
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
 from src.common.config import AppConfig
 
 
-def calculate_trade_metrics(trades_df: pd.DataFrame) -> Dict[str, Any]:
+def calculate_trade_metrics(trades_df: pd.DataFrame) -> dict[str, Any]:
     """Computes statistical trade metrics from closed trades log."""
     if trades_df.empty or len(trades_df) == 0:
         return {
@@ -147,7 +148,7 @@ def calculate_portfolio_metrics(
     equity_df: pd.DataFrame,
     initial_capital: float = 100_000.0,
     risk_free_rate: float = 0.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Computes time-series risk metrics (Sharpe, Sortino, MDD, Calmar, CAGR)."""
     if equity_df.empty or "equity" not in equity_df.columns:
         return {
@@ -183,8 +184,7 @@ def calculate_portfolio_metrics(
     for dd in drawdowns_pct:
         if dd > 0:
             current_duration += 1
-            if current_duration > mdd_duration_bars:
-                mdd_duration_bars = current_duration
+            mdd_duration_bars = max(mdd_duration_bars, current_duration)
         else:
             current_duration = 0
 
@@ -263,8 +263,10 @@ def generate_performance_report(
     trades_df: pd.DataFrame,
     equity_df: pd.DataFrame,
     config: AppConfig,
-) -> Dict[str, Any]:
-    """Generates complete hierarchical performance dictionary matching metrics.json schema."""
+) -> dict[str, Any]:
+    """Generates complete hierarchical performance dictionary
+    matching metrics.json schema.
+    """
     trade_metrics = calculate_trade_metrics(trades_df)
     portfolio_metrics = calculate_portfolio_metrics(
         equity_df=equity_df,

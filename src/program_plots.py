@@ -1,9 +1,10 @@
 import pandas as pd
+
+from src.backtest.engine import BacktestResult
 from src.common.config import load_config
 from src.evaluation.metrics import generate_performance_report
-from src.visualization.performance_plotter import PerformancePlotter
 from src.visualization.candlestick_plotter import CandlestickTradePlotter
-from src.backtest.engine import BacktestResult
+from src.visualization.performance_plotter import PerformancePlotter
 
 # 1. Load configuration and saved outputs
 cfg = load_config("config/default_config.yaml")
@@ -42,4 +43,4 @@ trade_plots = candle_plotter.plot_all_trades(
     trades=[],  # Can iterate over trades_df rows or reconstructed Trade objects
     processed_bars=processed_df,
 )
-print(f"Candlestick trade charts saved to plots/trades/")
+print("Candlestick trade charts saved to plots/trades/")

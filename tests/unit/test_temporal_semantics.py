@@ -18,7 +18,6 @@ import pandas as pd
 from src.backtest.engine import BacktestEngine
 from src.common.time_utils import get_timeframe_minutes
 from src.data.processor import DataProcessor
-
 from tests.unit.test_accounting_reconciliation import (  # shared hand-calc fixtures
     _assert_reconciles,
     _eod_fixture_config,
@@ -31,14 +30,16 @@ def _raw_day(date_str, periods=391, freq="1min"):
     open_et = pd.Timestamp(f"{date_str} 09:30:00", tz="America/New_York")
     ts = pd.date_range(start=open_et, periods=periods, freq=freq)
     n = len(ts)
-    return pd.DataFrame({
-        "timestamp": ts,
-        "open": np.full(n, 500.0),
-        "high": np.full(n, 500.5),
-        "low": np.full(n, 499.5),
-        "close": np.full(n, 500.0),
-        "volume": np.full(n, 1000.0),
-    })
+    return pd.DataFrame(
+        {
+            "timestamp": ts,
+            "open": np.full(n, 500.0),
+            "high": np.full(n, 500.5),
+            "low": np.full(n, 499.5),
+            "close": np.full(n, 500.0),
+            "volume": np.full(n, 1000.0),
+        }
+    )
 
 
 def test_or_boundary_bar_is_first_tradable():
@@ -152,9 +153,7 @@ def test_dst_fall_back_session_geometry():
 def test_coarse_five_minute_timeframe_runs():
     """T11: 5-minute bars host a 15-minute OR (3 bars) with close decisions."""
     cfg = _eod_fixture_config()
-    cfg = dataclasses.replace(
-        cfg, data=dataclasses.replace(cfg.data, timeframe="5Min")
-    )
+    cfg = dataclasses.replace(cfg, data=dataclasses.replace(cfg.data, timeframe="5Min"))
     raw = _raw_day("2024-01-02", periods=79, freq="5min")
     assert str(raw["timestamp"].iloc[-1].time()) == "16:00:00"
     raw.loc[1, "high"] = 501.0

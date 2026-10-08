@@ -14,9 +14,8 @@ The StreamCollector runs independently of browser sessions.  It:
 
 from __future__ import annotations
 
-import datetime
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -28,7 +27,6 @@ from src.services.monitor_state import (
     new_session,
     on_bar,
 )
-
 
 # ---------------------------------------------------------------------------
 # Finalization policy
@@ -46,6 +44,7 @@ class FinalizationPolicy:
         stale_threshold_seconds: No bar received in this window -> stale.
         backfill_overlap_bars: How many bars to overlap on backfill for idempotency.
     """
+
     reorder_window_seconds: int = 10
     max_gap_bars: int = 5
     stale_threshold_seconds: int = 90
@@ -59,11 +58,15 @@ class FinalizationPolicy:
 
 @dataclass
 class BarStore:
-    """Mutable in-memory bar store, keyed by (symbol, feed, timeframe, bar_start, revision).
+    """Mutable in-memory bar store, keyed by:
+    (symbol, feed, timeframe, bar_start, revision).
 
     Extendable to SQLite in a future phase.
     """
-    _bars: Dict[Tuple[str, str, str, pd.Timestamp, int], RawBar] = field(default_factory=dict)
+
+    _bars: dict[tuple[str, str, str, pd.Timestamp, int], RawBar] = field(
+        default_factory=dict
+    )
 
     def put(self, bar: RawBar, timeframe: str = "1Min") -> bool:
         """Insert or replace a bar. Returns True if this is a new key."""
@@ -72,7 +75,7 @@ class BarStore:
         self._bars[key] = bar
         return is_new
 
-    def get_session_bars(self, symbol: str, feed: str, session_id: str) -> List[RawBar]:
+    def get_session_bars(self, symbol: str, feed: str, session_id: str) -> list[RawBar]:
         """Return all bars for one session, sorted by bar_start."""
         date = session_id  # YYYY-MM-DD
         result = []
@@ -83,10 +86,11 @@ class BarStore:
                     result.append(bar)
         return sorted(result, key=lambda b: b.bar_start)
 
-    def get_latest(self, symbol: str, feed: str) -> Optional[RawBar]:
+    def get_latest(self, symbol: str, feed: str) -> RawBar | None:
         """Return the bar with the latest bar_start for (symbol, feed)."""
         candidates = [
-            bar for (sym, fd, _tf, _ts, _rev), bar in self._bars.items()
+            bar
+            for (sym, fd, _tf, _ts, _rev), bar in self._bars.items()
             if sym == symbol and fd == feed
         ]
         if not candidates:
@@ -118,6 +122,7 @@ class CollectorState:
         monitor_state: Current session MonitorState (or None).
         stopped: True after stop() is called.
     """
+
     symbol: str
     feed: str
     timeframe: str
@@ -127,9 +132,9 @@ class CollectorState:
     bars_dropped_dup: int = 0
     gaps_detected: int = 0
     stale: bool = False
-    last_bar_market_ts: Optional[pd.Timestamp] = None
-    last_heartbeat_at: Optional[pd.Timestamp] = None
-    monitor_state: Optional[MonitorState] = None
+    last_bar_market_ts: pd.Timestamp | None = None
+    last_heartbeat_at: pd.Timestamp | None = None
+    monitor_state: MonitorState | None = None
     stopped: bool = False
 
 
@@ -160,9 +165,6 @@ def expected_bars_between(
     et = "America/New_York"
     start_et = start.tz_convert(et)
     end_et = end.tz_convert(et)
-
-    rth_open = datetime.time(9, 30, 0)
-    rth_close = datetime.time(16, 0, 0)
 
     # Clamp to RTH bounds
     day = start_et.date()
@@ -208,7 +210,7 @@ class StreamCollector:
         session_cfg: SessionConfig,
         policy: FinalizationPolicy = FinalizationPolicy(),
         *,
-        clock: Optional[Callable[[], pd.Timestamp]] = None,
+        clock: Callable[[], pd.Timestamp] | None = None,
     ) -> None:
         self._adapter = adapter
         self._symbol = symbol
@@ -229,9 +231,9 @@ class StreamCollector:
         self._bars_dropped_dup: int = 0
         self._gaps_detected: int = 0
         self._stale: bool = False
-        self._last_bar_market_ts: Optional[pd.Timestamp] = None
-        self._last_heartbeat_at: Optional[pd.Timestamp] = None
-        self._last_event_wall_ts: Optional[pd.Timestamp] = None
+        self._last_bar_market_ts: pd.Timestamp | None = None
+        self._last_heartbeat_at: pd.Timestamp | None = None
+        self._last_event_wall_ts: pd.Timestamp | None = None
         self._stopped: bool = False
 
         # Derive session_id from clock at construction time
@@ -268,7 +270,8 @@ class StreamCollector:
         )
 
     def run_one(self) -> bool:
-        """Process ONE event from the adapter. Returns True if processed, False if stopped.
+        """Process ONE event from the adapter.
+        Returns True if processed, False if stopped.
 
         Handles:
         - bar: dedup -> finalize -> on_bar() -> gap check
@@ -323,10 +326,7 @@ class StreamCollector:
     def _finalize_bar(self, bar: RawBar) -> None:
         """Pass a finalized bar to on_bar() and check for gaps."""
         # Gap detection: check expected bars between last finalized bar and this one
-        if (
-            self._last_bar_market_ts is not None
-            and not self._monitor_state.degraded
-        ):
+        if self._last_bar_market_ts is not None and not self._monitor_state.degraded:
             gap = expected_bars_between(
                 self._last_bar_market_ts,
                 bar.bar_start,

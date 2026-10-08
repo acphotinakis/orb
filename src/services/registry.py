@@ -31,8 +31,9 @@ import os
 import re
 import sqlite3
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any
 from uuid import uuid4
 
 REGISTRY_DIRNAME = "runs"
@@ -113,7 +114,7 @@ class RunRegistry:
 
     # -- helpers ------------------------------------------------------
 
-    def _row(self, run_id: str) -> Dict[str, Any]:
+    def _row(self, run_id: str) -> dict[str, Any]:
         with _connect(self.path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
@@ -124,7 +125,7 @@ class RunRegistry:
         return dict(row)
 
     @staticmethod
-    def _pid_alive(pid: Optional[int]) -> bool:
+    def _pid_alive(pid: int | None) -> bool:
         if not pid:
             return False
         try:
@@ -139,11 +140,11 @@ class RunRegistry:
         self,
         *,
         request_token: str,
-        run_label: Optional[str],
+        run_label: str | None,
         config: Mapping[str, Any],
         options: Mapping[str, Any],
         source: Mapping[str, Any],
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
     ) -> str:
         """Insert a queued run; retried submissions return the same run_id."""
         if not isinstance(request_token, str) or not request_token.strip():
@@ -181,21 +182,21 @@ class RunRegistry:
                 raise RuntimeError("Idempotent submit lost its own race; retry.")
             return row[0]
 
-    def get(self, run_id: str) -> Dict[str, Any]:
+    def get(self, run_id: str) -> dict[str, Any]:
         """Full run record (raises KeyError when unknown)."""
         return self._row(run_id)
 
-    def get_by_token(self, request_token: str) -> Dict[str, Any]:
+    def get_by_token(self, request_token: str) -> dict[str, Any]:
         with _connect(self.path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM runs WHERE request_token = ?", (request_token,)
             ).fetchone()
         if row is None:
-            raise KeyError(f"Unknown request token.")
+            raise KeyError("Unknown request token.")
         return dict(row)
 
-    def list_runs(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def list_runs(self, limit: int = 100) -> list[dict[str, Any]]:
         with _connect(self.path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
@@ -205,7 +206,7 @@ class RunRegistry:
 
     # -- single-worker dispatch ---------------------------------------
 
-    def active_run(self) -> Optional[Dict[str, Any]]:
+    def active_run(self) -> dict[str, Any] | None:
         """The running/cancelling run holding the worker slot, if any."""
         with _connect(self.path) as conn:
             conn.row_factory = sqlite3.Row
@@ -215,9 +216,7 @@ class RunRegistry:
             ).fetchone()
         return dict(row) if row else None
 
-    def claim_next_queued(
-        self, owner: str, lease_secs: float = 300.0
-    ) -> Optional[str]:
+    def claim_next_queued(self, owner: str, lease_secs: float = 300.0) -> str | None:
         """Atomically promote the oldest queued run iff the slot is free."""
         now = time.time()
         with _connect(self.path) as conn:
@@ -308,9 +307,7 @@ class RunRegistry:
                     raise KeyError(f"Unknown run '{run_id}'.")
                 if row[0] not in ("running", "cancelling"):
                     conn.execute("ROLLBACK")
-                    raise ValueError(
-                        f"Cannot append events to a '{row[0]}' run."
-                    )
+                    raise ValueError(f"Cannot append events to a '{row[0]}' run.")
                 nxt = conn.execute(
                     "SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?",
                     (run_id,),
@@ -335,7 +332,7 @@ class RunRegistry:
 
     def get_events(
         self, run_id: str, after_seq: int = 0, limit: int = 500
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Events after *after_seq* (cursor reads, deduplicated by sequence)."""
         self._row(run_id)  # KeyError when unknown
         with _connect(self.path) as conn:
@@ -376,7 +373,7 @@ class RunRegistry:
                 return "cancelling"
         return self._row(run_id)["status"]
 
-    def finish(self, run_id: str, outcome: str, error: Optional[str] = None) -> bool:
+    def finish(self, run_id: str, outcome: str, error: str | None = None) -> bool:
         """Commit one terminal outcome; False when another terminal won first."""
         allowed = {
             "succeeded": ("running",),
@@ -414,7 +411,7 @@ class RunRegistry:
         except (ChildProcessError, OSError):
             pass
 
-    def reconcile(self, heartbeat_timeout_secs: float = 120.0) -> List[str]:
+    def reconcile(self, heartbeat_timeout_secs: float = 120.0) -> list[str]:
         """Mark runs with dead workers failed; never silently rerun anything.
 
         A run is eligible only when its heartbeat is stale AND its recorded
@@ -436,7 +433,8 @@ class RunRegistry:
             with _connect(self.path) as conn:
                 cur = conn.execute(
                     "UPDATE runs SET status = 'failed',"
-                    " error = 'Worker process lost; no terminal outcome was committed.',"
+                    " error = 'Worker process lost; "
+                    "no terminal outcome was committed.',"
                     " updated_at = ? WHERE run_id = ?"
                     " AND status IN ('running', 'cancelling')",
                     (now, run_id),

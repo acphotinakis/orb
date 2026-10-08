@@ -17,7 +17,9 @@ def test_position_sizing_fixed_risk():
     )
     model = ExecutionModel(cfg)
     # Entry = 500, Stop = 495 -> Risk/sh = 5.0 -> 1000 / 5 = 200 shares
-    shares = model.calculate_position_size(capital=100_000.0, entry_price=500.0, stop_price=495.0)
+    shares = model.calculate_position_size(
+        capital=100_000.0, entry_price=500.0, stop_price=495.0
+    )
     assert shares == 200
 
 
@@ -29,17 +31,23 @@ def test_slippage_and_commission():
     model = ExecutionModel(cfg)
 
     # Long Entry: adverse fill + $0.01
-    fill_p, slip_d, comm_d = model.calculate_entry_execution("LONG", price=500.0, shares=100)
+    fill_p, slip_d, comm_d = model.calculate_entry_execution(
+        "LONG", price=500.0, shares=100
+    )
     assert fill_p == 500.01
     assert slip_d == 1.0
     assert round(comm_d, 4) == 0.35
 
     # Long Stop Exit: adverse fill - $0.01
-    fill_p2, slip_d2, comm_d2 = model.calculate_exit_execution("LONG", price=495.0, shares=100, reason=ExitReason.STOP)
+    fill_p2, slip_d2, comm_d2 = model.calculate_exit_execution(
+        "LONG", price=495.0, shares=100, reason=ExitReason.STOP
+    )
     assert fill_p2 == 494.99
     assert slip_d2 == 1.0
 
     # Long Target Exit: limit order, zero slippage
-    fill_tp, slip_tp, _ = model.calculate_exit_execution("LONG", price=510.0, shares=100, reason=ExitReason.TARGET)
+    fill_tp, slip_tp, _ = model.calculate_exit_execution(
+        "LONG", price=510.0, shares=100, reason=ExitReason.TARGET
+    )
     assert fill_tp == 510.0
     assert slip_tp == 0.0

@@ -1,9 +1,9 @@
 """Direct-file launch must not depend on pytest's repository import path."""
 
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 
 def test_dashboard_import_without_pythonpath(tmp_path):
@@ -13,9 +13,13 @@ def test_dashboard_import_without_pythonpath(tmp_path):
     # Isolated Python removes cwd/PYTHONPATH, reproducing the missing root
     # in a Streamlit direct-file launch. Avoid executing the UI's main().
     result = subprocess.run(
-        [sys.executable, "-I", "-c",
-         "import runpy, sys; runpy.run_path(sys.argv[1], run_name='launch_test')",
-         str(app)],
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import runpy, sys; runpy.run_path(sys.argv[1], run_name='launch_test')",
+            str(app),
+        ],
         cwd=tmp_path,
         env=env,
         capture_output=True,

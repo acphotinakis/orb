@@ -18,7 +18,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from src.common.logger import get_logger
@@ -44,9 +44,7 @@ class RunService:
 
     # -- submission ----------------------------------------------------
 
-    def submit_run(
-        self, request: RunRequest, request_token: Optional[str] = None
-    ) -> str:
+    def submit_run(self, request: RunRequest, request_token: str | None = None) -> str:
         """Validate (already done by the request), persist, enqueue, dispatch.
 
         Args:
@@ -77,15 +75,15 @@ class RunService:
 
     # -- reads ----------------------------------------------------------
 
-    def get_run(self, run_id: str) -> Dict[str, Any]:
+    def get_run(self, run_id: str) -> dict[str, Any]:
         return self.registry.get(run_id)
 
-    def list_runs(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def list_runs(self, limit: int = 100) -> list[dict[str, Any]]:
         return self.registry.list_runs(limit=limit)
 
     def get_events(
         self, run_id: str, after_seq: int = 0, limit: int = 500
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         return self.registry.get_events(run_id, after_seq=after_seq, limit=limit)
 
     def read_log_tail(self, run_id: str, max_bytes: int = 65536) -> str:
@@ -117,7 +115,7 @@ class RunService:
 
     # -- supervision ------------------------------------------------------
 
-    def ensure_supervisor(self) -> Optional[str]:
+    def ensure_supervisor(self) -> str | None:
         """Reconcile dead workers, then dispatch at most one queued run.
 
         Returns the dispatched run ID, or ``None`` when the slot is busy or
@@ -133,8 +131,13 @@ class RunService:
         log_handle = open(log_path, "ab")
         try:
             proc = subprocess.Popen(
-                [sys.executable, "-m", "src.services.worker",
-                 str(self.storage_root), claimed],
+                [
+                    sys.executable,
+                    "-m",
+                    "src.services.worker",
+                    str(self.storage_root),
+                    claimed,
+                ],
                 cwd=str(_REPO_ROOT),
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
@@ -150,18 +153,22 @@ class RunService:
             log_handle.close()
         adopted = self.registry.adopt_worker(claimed, self._owner, proc.pid)
         if not adopted:
-            logger.error("Run '%s' left the slot before adopt; terminating worker.", claimed)
+            logger.error(
+                "Run '%s' left the slot before adopt; terminating worker.", claimed
+            )
             proc.terminate()
             return None
         logger.info("Dispatched run '%s' to worker pid %d.", claimed, proc.pid)
         return claimed
 
-    def reconcile(self) -> List[str]:
+    def reconcile(self) -> list[str]:
         """Public crash-recovery entry (no dispatch)."""
         return self.registry.reconcile(self.heartbeat_timeout_secs)
 
 
-def dispatch_next(storage_root: str | Path, owner: str = "worker-handoff") -> Optional[str]:
+def dispatch_next(
+    storage_root: str | Path, owner: str = "worker-handoff"
+) -> str | None:
     """Claim and spawn at most one queued run (called by workers on exit and
     by the service after submit/cancel).  Best-effort: never raises."""
     try:
@@ -174,8 +181,13 @@ def dispatch_next(storage_root: str | Path, owner: str = "worker-handoff") -> Op
         log_handle = open(log_path, "ab")
         try:
             proc = subprocess.Popen(
-                [sys.executable, "-m", "src.services.worker",
-                 str(storage_root), claimed],
+                [
+                    sys.executable,
+                    "-m",
+                    "src.services.worker",
+                    str(storage_root),
+                    claimed,
+                ],
                 cwd=str(_REPO_ROOT),
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
@@ -196,7 +208,7 @@ def dispatch_next(storage_root: str | Path, owner: str = "worker-handoff") -> Op
         return None
 
 
-def serialize_run(row: Dict[str, Any]) -> Dict[str, Any]:
+def serialize_run(row: dict[str, Any]) -> dict[str, Any]:
     """JSON-safe projection of a registry row (secrets never stored anyway)."""
     return {
         "run_id": row["run_id"],

@@ -13,10 +13,9 @@ from src.backtest.trace import (
     TRACE_SCHEMA_VERSION,
     TraceCollector,
 )
+from src.common.exceptions import ConfigurationError
 from src.services import replay
 from src.services.artifact_store import read_trace
-from src.common.exceptions import ConfigurationError
-
 from tests.unit.test_accounting_reconciliation import (
     _eod_fixture_config,
     _session_frame,
@@ -51,8 +50,13 @@ def _reduce(traced, session_id, cursor, **kwargs):
     session_events = replay.filter_session_events(events, session_id)
     bars = df.loc[df["session_id"] == session_id].reset_index(drop=True)
     return replay.reduce_events(
-        session_events, cursor, session_bars=bars, session_id=session_id,
-        or_minutes=15, bar_minutes=1, **kwargs,
+        session_events,
+        cursor,
+        session_bars=bars,
+        session_id=session_id,
+        or_minutes=15,
+        bar_minutes=1,
+        **kwargs,
     )
 
 
@@ -61,8 +65,12 @@ def _full(traced, session_id):
     session_events = replay.filter_session_events(events, session_id)
     bars = df.loc[df["session_id"] == session_id].reset_index(drop=True)
     return replay.reduce_events(
-        session_events, len(session_events), session_bars=bars,
-        session_id=session_id, or_minutes=15, bar_minutes=1,
+        session_events,
+        len(session_events),
+        session_bars=bars,
+        session_id=session_id,
+        or_minutes=15,
+        bar_minutes=1,
     )
 
 
@@ -116,17 +124,20 @@ def test_future_perturbation_leaves_cursor_state_unchanged(traced):
 
     perturbed = df.copy()
     cursor_time = before.cursor_time
-    mask = (
-        (perturbed["session_id"] == session_id)
-        & (pd.to_datetime(perturbed["timestamp"]) > cursor_time)
+    mask = (perturbed["session_id"] == session_id) & (
+        pd.to_datetime(perturbed["timestamp"]) > cursor_time
     )
     perturbed.loc[mask, "high"] = 9999.0
     perturbed.loc[mask, "low"] = 0.01
     perturbed.loc[mask, "close"] = 9999.0
     bars = perturbed.loc[perturbed["session_id"] == session_id].reset_index(drop=True)
     after = replay.reduce_events(
-        session_events, cursor, session_bars=bars, session_id=session_id,
-        or_minutes=15, bar_minutes=1,
+        session_events,
+        cursor,
+        session_bars=bars,
+        session_id=session_id,
+        or_minutes=15,
+        bar_minutes=1,
     )
     assert _state_key(after) == _state_key(before)
     # Perturbing the OR window itself is also contained: the frozen range at a
@@ -145,9 +156,12 @@ def test_future_or_extreme_hidden_during_formation(traced):
     ]
     assert early_events, "fixture must contain pre-freeze decisions"
     early = replay.reduce_events(
-        session_events, len(early_events),
+        session_events,
+        len(early_events),
         session_bars=df.loc[df["session_id"] == "2024-01-02"].reset_index(drop=True),
-        session_id="2024-01-02", or_minutes=15, bar_minutes=1,
+        session_id="2024-01-02",
+        or_minutes=15,
+        bar_minutes=1,
     )
     assert early.range_frozen is False
     assert early.range_frozen_high is None
@@ -222,9 +236,12 @@ def test_truncated_trace_replays_available_prefix(traced):
     parsed_header, parsed_events = TraceCollector.parse_jsonl(payload)
     assert len(parsed_events) == 5
     state = replay.reduce_events(
-        parsed_events, 5,
+        parsed_events,
+        5,
         session_bars=df.loc[df["session_id"] == "2024-01-02"].reset_index(drop=True),
-        session_id="2024-01-02", or_minutes=15, bar_minutes=1,
+        session_id="2024-01-02",
+        or_minutes=15,
+        bar_minutes=1,
     )
     assert state.cursor == 5
 
@@ -259,37 +276,61 @@ def test_checkpoints_match_and_seek_fast():
     for i in range(100_000):
         available = base + pd.Timedelta(minutes=i)
         if i % 1000 == 500:
-            events.append({
-                "seq": i, "event_type": "trade_opened", "trade_id": i,
-                "available_at": str(available),
-            })
+            events.append(
+                {
+                    "seq": i,
+                    "event_type": "trade_opened",
+                    "trade_id": i,
+                    "available_at": str(available),
+                }
+            )
         elif i % 1000 == 700:
-            events.append({
-                "seq": i, "event_type": "trade_closed", "trade_id": i - 200,
-                "pnl_dollars": 10.0, "available_at": str(available),
-            })
+            events.append(
+                {
+                    "seq": i,
+                    "event_type": "trade_closed",
+                    "trade_id": i - 200,
+                    "pnl_dollars": 10.0,
+                    "available_at": str(available),
+                }
+            )
         else:
-            events.append({
-                "seq": i, "event_type": "signal_check", "outcome": "rejected",
-                "available_at": str(available),
-            })
-    bars = pd.DataFrame({
-        "timestamp": [base + pd.Timedelta(minutes=i) for i in range(100_000)],
-        "minute_of_day": list(range(100_000)),
-        "high": 500.0, "low": 499.0,
-    })
+            events.append(
+                {
+                    "seq": i,
+                    "event_type": "signal_check",
+                    "outcome": "rejected",
+                    "available_at": str(available),
+                }
+            )
+    bars = pd.DataFrame(
+        {
+            "timestamp": [base + pd.Timedelta(minutes=i) for i in range(100_000)],
+            "minute_of_day": list(range(100_000)),
+            "high": 500.0,
+            "low": 499.0,
+        }
+    )
     checkpoints = replay.build_checkpoints(events)
     assert checkpoints[0].cursor == 0
 
     rng = random.Random(42)
     for cursor in [rng.randrange(100_001) for _ in range(10)]:
         full = replay.reduce_events(
-            events, cursor, session_bars=bars, session_id="2024-01-02",
-            or_minutes=15, bar_minutes=1,
+            events,
+            cursor,
+            session_bars=bars,
+            session_id="2024-01-02",
+            or_minutes=15,
+            bar_minutes=1,
         )
         resume = replay.reduce_events(
-            events, cursor, session_bars=bars, session_id="2024-01-02",
-            or_minutes=15, bar_minutes=1,
+            events,
+            cursor,
+            session_bars=bars,
+            session_id="2024-01-02",
+            or_minutes=15,
+            bar_minutes=1,
             start_from=replay.nearest_checkpoint(checkpoints, cursor),
         )
         assert _state_key(full) == _state_key(resume)
@@ -298,8 +339,12 @@ def test_checkpoints_match_and_seek_fast():
     start = _time.time()
     for cursor in probe:
         replay.reduce_events(
-            events, cursor, session_bars=bars, session_id="2024-01-02",
-            or_minutes=15, bar_minutes=1,
+            events,
+            cursor,
+            session_bars=bars,
+            session_id="2024-01-02",
+            or_minutes=15,
+            bar_minutes=1,
             start_from=replay.nearest_checkpoint(checkpoints, cursor),
         )
     elapsed = (_time.time() - start) / len(probe)
@@ -326,53 +371,90 @@ def test_replay_index_seek_budget_100k():
         available = base + pd.Timedelta(minutes=i)
         # Every 100th event: OR freeze marker (realistic OR boundary events)
         if i % 100 == 50:
-            events.append({
-                "seq": i, "session_id": "2024-01-02",
-                "event_type": "or_frozen",
-                "bar_start": str(available), "available_at": str(available),
-                "valid": True, "or_high": 502.0, "or_low": 498.0, "or_width": 4.0,
-            })
+            events.append(
+                {
+                    "seq": i,
+                    "session_id": "2024-01-02",
+                    "event_type": "or_frozen",
+                    "bar_start": str(available),
+                    "available_at": str(available),
+                    "valid": True,
+                    "or_high": 502.0,
+                    "or_low": 498.0,
+                    "or_width": 4.0,
+                }
+            )
         # Sparse trade open/close pairs (every 300 bars) with equity marks
         elif i % 300 == 200:
             open_trade_id = i
-            events.append({
-                "seq": i, "session_id": "2024-01-02",
-                "event_type": "trade_opened",
-                "trade_id": i, "rule_id": "orb_breakout_close",
-                "direction": "LONG", "entry_price": 502.1, "shares": 100,
-                "stop_loss": 498.0, "take_profit": 510.0,
-                "bar_start": str(available), "available_at": str(available),
-            })
+            events.append(
+                {
+                    "seq": i,
+                    "session_id": "2024-01-02",
+                    "event_type": "trade_opened",
+                    "trade_id": i,
+                    "rule_id": "orb_breakout_close",
+                    "direction": "LONG",
+                    "entry_price": 502.1,
+                    "shares": 100,
+                    "stop_loss": 498.0,
+                    "take_profit": 510.0,
+                    "bar_start": str(available),
+                    "available_at": str(available),
+                }
+            )
         elif i % 300 == 250 and open_trade_id is not None:
-            events.append({
-                "seq": i, "session_id": "2024-01-02",
-                "event_type": "trade_closed",
-                "trade_id": open_trade_id, "pnl_dollars": 80.0,
-                "exit_reason": "TARGET", "rule_id": "exit_bracket",
-                "bar_start": str(available), "available_at": str(available),
-            })
+            events.append(
+                {
+                    "seq": i,
+                    "session_id": "2024-01-02",
+                    "event_type": "trade_closed",
+                    "trade_id": open_trade_id,
+                    "pnl_dollars": 80.0,
+                    "exit_reason": "TARGET",
+                    "rule_id": "exit_bracket",
+                    "bar_start": str(available),
+                    "available_at": str(available),
+                }
+            )
             open_trade_id = None
         elif i % 300 == 275:
-            events.append({
-                "seq": i, "session_id": "2024-01-02",
-                "event_type": "equity_mark",
-                "bar_start": str(available), "available_at": str(available),
-                "cash": 100_000.0, "position_value": 0.0, "equity": 100_000.0,
-            })
+            events.append(
+                {
+                    "seq": i,
+                    "session_id": "2024-01-02",
+                    "event_type": "equity_mark",
+                    "bar_start": str(available),
+                    "available_at": str(available),
+                    "cash": 100_000.0,
+                    "position_value": 0.0,
+                    "equity": 100_000.0,
+                }
+            )
         # Default: bar_observed (the dominant event type — ≈98% of events)
         else:
-            events.append({
-                "seq": i, "session_id": "2024-01-02",
-                "event_type": "bar_observed",
-                "bar_start": str(available), "available_at": str(available),
-                "open": 500.0, "high": 502.0, "low": 498.0, "close": 501.0,
-                "volume": 10_000.0, "minute_of_day": i % 390,
-                "is_opening_range": i < 15,
-            })
+            events.append(
+                {
+                    "seq": i,
+                    "session_id": "2024-01-02",
+                    "event_type": "bar_observed",
+                    "bar_start": str(available),
+                    "available_at": str(available),
+                    "open": 500.0,
+                    "high": 502.0,
+                    "low": 498.0,
+                    "close": 501.0,
+                    "volume": 10_000.0,
+                    "minute_of_day": i % 390,
+                    "is_opening_range": i < 15,
+                }
+            )
 
     bar_count = sum(1 for e in events if e["event_type"] == "bar_observed")
     assert len(events) == 100_000
-    assert bar_count / len(events) > 0.95, "Fixture must be bar-heavy (>95% bar_observed)"
+    assert (
+        bar_count / len(events) > 0.95
+    ), "Fixture must be bar-heavy (>95% bar_observed)"
 
     # One-time index build (paid at session load, not per-seek)
     index = replay.ReplayIndex(events, every=1000)
@@ -390,14 +472,13 @@ def test_replay_index_seek_budget_100k():
         # Sanity: cursor is clamped correctly
         assert state.cursor == cursor
 
-    mean_ms = sum(
-        (_time.perf_counter() - _time.perf_counter()) for _ in [0]
-    )  # placeholder — we report worst_ms
-    print(f"\nP4-A7 ReplayIndex seek: worst={worst_ms:.1f} ms over {len(cursors)} seeks "
-          f"(100,000-event bar-heavy trace, budget=500 ms)")
-    assert worst_ms < 500.0, (
-        f"P4-A7 FAIL: worst seek {worst_ms:.1f} ms exceeds 500 ms budget"
+    print(
+        f"\nP4-A7 ReplayIndex seek: worst={worst_ms:.1f} ms over {len(cursors)} seeks "
+        f"(100,000-event bar-heavy trace, budget=500 ms)"
     )
+    assert (
+        worst_ms < 500.0
+    ), f"P4-A7 FAIL: worst seek {worst_ms:.1f} ms exceeds 500 ms budget"
 
 
 def test_actual_formation_trace_cannot_leak_future_extremes(traced):
@@ -405,14 +486,19 @@ def test_actual_formation_trace_cannot_leak_future_extremes(traced):
     cfg, df, _, _, events = traced
     session = "2024-01-02"
     original = replay.filter_session_events(events, session)
-    cursor = next(i + 1 for i, e in enumerate(original)
-                  if e.get("bar_start") == str(df.iloc[4]["timestamp"]))
+    cursor = next(
+        i + 1
+        for i, e in enumerate(original)
+        if e.get("bar_start") == str(df.iloc[4]["timestamp"])
+    )
     altered = df.copy()
     altered.loc[5:14, "high"] = 9000.0
     other = TraceCollector()
     BacktestEngine(cfg).run(altered, trace=other)
     changed = replay.filter_session_events(other.events, session)
-    kwargs = dict(session_bars=altered, session_id=session, or_minutes=15, bar_minutes=1)
+    kwargs = dict(
+        session_bars=altered, session_id=session, or_minutes=15, bar_minutes=1
+    )
     before = replay.reduce_events(original, cursor, **kwargs)
     after = replay.reduce_events(changed, cursor, **kwargs)
     pd.testing.assert_frame_equal(before.visible_bars, after.visible_bars)
@@ -435,13 +521,16 @@ def test_freeze_is_applied_by_sequence_not_timestamp(traced):
 @pytest.mark.parametrize("mutation", ["version", "sequence", "time"])
 def test_malformed_event_rejected(traced, mutation):
     import json
+
     collector = TraceCollector()
     BacktestEngine(traced[0]).run(traced[1], trace=collector)
     lines = collector.to_jsonl().splitlines()
     event = json.loads(lines[2])
-    event[{"version": "trace_version", "sequence": "seq", "time": "available_at"}[mutation]] = {
-        "version": 999, "sequence": 400, "time": "invalid"
-    }[mutation]
+    event[
+        {"version": "trace_version", "sequence": "seq", "time": "available_at"}[
+            mutation
+        ]
+    ] = {"version": 999, "sequence": 400, "time": "invalid"}[mutation]
     lines[2] = json.dumps(event)
     with pytest.raises(ValueError):
         TraceCollector.parse_jsonl("\n".join(lines))

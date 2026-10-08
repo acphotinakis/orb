@@ -15,7 +15,6 @@ import pytest
 from src.common.exceptions import ConfigurationError
 from src.dashboard import charts
 from src.dashboard.demo import generate_demo
-from src.services import artifact_store
 from src.services.artifact_store import (
     RUN_STATUS_COMPLETE,
     discover_runs,
@@ -219,9 +218,9 @@ def test_session_linkage_uses_recorded_data(demo_root):
 
 
 def test_browsing_triggers_no_compute_or_fetch(demo_root, monkeypatch):
+    from src import pipeline as pipeline_module
     from src.backtest import engine as engine_module
     from src.data import fetcher as fetcher_module
-    from src import pipeline as pipeline_module
 
     def _boom(*args, **kwargs):
         raise AssertionError("compute/fetch must not run while browsing")
@@ -235,9 +234,7 @@ def test_browsing_triggers_no_compute_or_fetch(demo_root, monkeypatch):
     session = art.equity["session_id"].iloc[0]
     read_session_bars(demo_root, art.manifest, session)
     charts.equity_figure(art.equity)
-    charts.session_candlestick(
-        read_session_bars(demo_root, art.manifest, session)
-    )
+    charts.session_candlestick(read_session_bars(demo_root, art.manifest, session))
     charts.r_distribution_figure(art.trades)
     read_download_bytes(demo_root, "demo_normal", "results/trades.csv")
     assert [r.run_id for r in runs]
@@ -256,8 +253,13 @@ def test_run_traversal_and_download_allowlist(demo_root):
     with pytest.raises(ConfigurationError):
         read_download_bytes(demo_root, "demo_normal", "../manifest.json")
     data, name = read_download_bytes(demo_root, "demo_normal", "results/trades.csv")
-    on_disk = (demo_root / "experiments" / "demo_normal__SPY_1Min_20240102_20240104"
-               / "results" / "trades.csv").read_bytes()
+    on_disk = (
+        demo_root
+        / "experiments"
+        / "demo_normal__SPY_1Min_20240102_20240104"
+        / "results"
+        / "trades.csv"
+    ).read_bytes()
     assert data == on_disk and name == "trades.csv"
 
 
@@ -265,15 +267,17 @@ def test_evil_label_round_trips_as_text(tmp_path, demo_root):
     dest_root, dest = _clone_run(demo_root, tmp_path)
     manifest_path = dest / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    manifest["run_label"] = '<script>alert(1)</script>,=CMD|xxx'
+    manifest["run_label"] = "<script>alert(1)</script>,=CMD|xxx"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     # Checksum over manifest is not part of validation; discovery reads it raw.
     runs = {r.run_id: r for r in discover_runs(dest_root)}
-    assert runs["demo_normal"].run_label == '<script>alert(1)</script>,=CMD|xxx'
+    assert runs["demo_normal"].run_label == "<script>alert(1)</script>,=CMD|xxx"
 
 
 def test_app_source_has_no_executable_html():
-    src = (Path(__file__).resolve().parents[2] / "src" / "dashboard" / "app.py").read_text()
+    src = (
+        Path(__file__).resolve().parents[2] / "src" / "dashboard" / "app.py"
+    ).read_text()
     assert "unsafe_allow_html" not in src
     assert "st.markdown" not in src
 
@@ -286,16 +290,22 @@ def test_app_source_has_no_executable_html():
 def test_large_run_stays_bounded_with_full_resolution_downloads(tmp_path):
     import numpy as np
 
-    equity = pd.DataFrame({
-        "timestamp": pd.date_range("2024-01-02", periods=100_000, freq="1min", tz="UTC"),
-        "equity": np.linspace(100_000, 120_000, 100_000),
-        "session_id": "2024-01-02",
-    })
-    trades = pd.DataFrame({
-        "trade_id": range(10_000),
-        "direction": "LONG",
-        "r_multiple": 1.0,
-    })
+    equity = pd.DataFrame(
+        {
+            "timestamp": pd.date_range(
+                "2024-01-02", periods=100_000, freq="1min", tz="UTC"
+            ),
+            "equity": np.linspace(100_000, 120_000, 100_000),
+            "session_id": "2024-01-02",
+        }
+    )
+    trades = pd.DataFrame(
+        {
+            "trade_id": range(10_000),
+            "direction": "LONG",
+            "r_multiple": 1.0,
+        }
+    )
     shown = charts.downsample_for_display(equity)
     assert len(shown) <= charts.MAX_DISPLAY_POINTS
     assert float(shown["equity"].max()) == float(equity["equity"].max())
@@ -340,7 +350,6 @@ def test_app_marks_filtered_scope(demo_root):
 def test_app_submit_flow_creates_watched_run(tmp_path):
     """P3 UI: invalid requests fail in the form; valid ones submit + complete."""
     import numpy as np
-
     from streamlit.testing.v1 import AppTest
 
     from src.services.run_service import RunService
@@ -349,17 +358,29 @@ def test_app_submit_flow_creates_watched_run(tmp_path):
     raw_dir.mkdir(parents=True, exist_ok=True)
     bars = []
     for d in ["2024-01-02", "2024-01-03"]:
-        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert("UTC")
+        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert(
+            "UTC"
+        )
         ts = pd.date_range(start=open_utc, periods=391, freq="1min")
         n = len(ts)
-        bars.append(pd.DataFrame({
-            "timestamp": ts, "open": np.full(n, 500.0), "high": np.full(n, 500.5),
-            "low": np.full(n, 499.5), "close": np.full(n, 500.0),
-            "volume": np.full(n, 1000.0),
-        }))
+        bars.append(
+            pd.DataFrame(
+                {
+                    "timestamp": ts,
+                    "open": np.full(n, 500.0),
+                    "high": np.full(n, 500.5),
+                    "low": np.full(n, 499.5),
+                    "close": np.full(n, 500.0),
+                    "volume": np.full(n, 1000.0),
+                }
+            )
+        )
     pd.concat(bars, ignore_index=True).to_parquet(
         raw_dir / "SPY_1Min_20240102_20240103.parquet",
-        engine="pyarrow", compression="zstd", index=False)
+        engine="pyarrow",
+        compression="zstd",
+        index=False,
+    )
 
     app_path = str(Path(__file__).resolve().parents[2] / "src" / "dashboard" / "app.py")
     at = AppTest.from_file(app_path)

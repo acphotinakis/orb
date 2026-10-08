@@ -22,23 +22,22 @@ calendar/timeframe policy.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
-import pandas as pd
-import numpy as np
 
-from src.common.config import AppConfig
-from src.backtest.models import Position, Trade, PositionSide, ExitReason
+import pandas as pd
+
+from src.backtest.execution_model import ExecutionModel
+from src.backtest.models import ExitReason, Position, PositionSide, Trade
 from src.backtest.trace import (
     RULE_BREAKOUT_CLOSE,
     RULE_EXIT_BRACKET,
     RULE_FLATTEN,
     TraceCollector,
 )
-from src.common.time_utils import get_timeframe_minutes
-from src.backtest.execution_model import ExecutionModel
-from src.strategy.opening_range import OpeningRangeCalculator, OpeningRange
-from src.strategy.signals import SignalGenerator, Signal, evaluate_bar_signal
+from src.common.config import AppConfig
 from src.common.logger import get_logger
+from src.common.time_utils import get_timeframe_minutes
+from src.strategy.opening_range import OpeningRange, OpeningRangeCalculator
+from src.strategy.signals import Signal, SignalGenerator, evaluate_bar_signal
 
 logger = get_logger(__name__)
 
@@ -47,7 +46,7 @@ logger = get_logger(__name__)
 class BacktestResult:
     """Container holding all backtest execution artifacts."""
 
-    trades: List[Trade]
+    trades: list[Trade]
     trades_df: pd.DataFrame
     equity_curve: pd.DataFrame
     daily_summary: pd.DataFrame
@@ -72,9 +71,9 @@ class BacktestEngine:
         self,
         df_processed: pd.DataFrame,
         *,
-        progress: Optional[callable] = None,
-        cancel_requested: Optional[callable] = None,
-        trace: Optional["TraceCollector"] = None,
+        progress: callable | None = None,
+        cancel_requested: callable | None = None,
+        trace: TraceCollector | None = None,
     ) -> BacktestResult:
         """Executes full backtest across all sessions in df_processed.
 
@@ -101,9 +100,9 @@ class BacktestEngine:
         session_groups = df.groupby("session_id", sort=False)
 
         current_capital = self.config.execution.initial_capital
-        all_trades: List[Trade] = []
-        equity_records: List[dict] = []
-        daily_records: List[dict] = []
+        all_trades: list[Trade] = []
+        equity_records: list[dict] = []
+        daily_records: list[dict] = []
         trade_id_counter = 1
         cancelled = False
 
@@ -132,10 +131,18 @@ class BacktestEngine:
             session_id_str = str(session_id)
             if _cancelled():
                 cancelled = True
-                logger.info("Cancellation acknowledged before session %s.", session_id_str)
+                logger.info(
+                    "Cancellation acknowledged before session %s.", session_id_str
+                )
                 break
-            _emit({"event_type": "session_started", "session_id": session_id_str,
-                   "completed_sessions": completed_sessions, "total_sessions": total_sessions})
+            _emit(
+                {
+                    "event_type": "session_started",
+                    "session_id": session_id_str,
+                    "completed_sessions": completed_sessions,
+                    "total_sessions": total_sessions,
+                }
+            )
             session_bars = session_bars.sort_values("timestamp").reset_index(drop=True)
 
             # 1. Opening Range phase: Compute & Freeze OR
@@ -148,10 +155,15 @@ class BacktestEngine:
             def record_equity(row):
                 if trace is not None:
                     trace.record(
-                        "equity_mark", session_id=session_id_str,
+                        "equity_mark",
+                        session_id=session_id_str,
                         bar_start=str(row["timestamp"]),
-                        available_at=str(pd.Timestamp(row["timestamp"]) + pd.Timedelta(minutes=bar_minutes)),
-                        cash=float(row["cash"]), position_value=float(row["position_value"]),
+                        available_at=str(
+                            pd.Timestamp(row["timestamp"])
+                            + pd.Timedelta(minutes=bar_minutes)
+                        ),
+                        cash=float(row["cash"]),
+                        position_value=float(row["position_value"]),
                         equity=float(row["equity"]),
                     )
 
@@ -162,23 +174,30 @@ class BacktestEngine:
                 bar_start = pd.Timestamp(bar["timestamp"])
                 available = bar_start + pd.Timedelta(minutes=bar_minutes)
                 trace.record(
-                    "bar_observed", session_id=session_id_str,
-                    bar_start=str(bar_start), available_at=str(available),
-                    **{key: float(bar[key]) for key in
-                       ("open", "high", "low", "close", "volume")},
+                    "bar_observed",
+                    session_id=session_id_str,
+                    bar_start=str(bar_start),
+                    available_at=str(available),
+                    **{
+                        key: float(bar[key])
+                        for key in ("open", "high", "low", "close", "volume")
+                    },
                     minute_of_day=int(bar["minute_of_day"]),
                     is_opening_range=bool(bar.get("is_opening_range", False)),
                 )
                 if not freeze_recorded and available >= freeze_at:
                     trace.record(
-                        "or_frozen", session_id=session_id_str,
-                        bar_start=str(bar_start), available_at=str(available),
+                        "or_frozen",
+                        session_id=session_id_str,
+                        bar_start=str(bar_start),
+                        available_at=str(available),
                         valid=bool(or_obj.is_valid),
                         or_high=float(or_obj.or_high) if or_obj.is_valid else None,
                         or_low=float(or_obj.or_low) if or_obj.is_valid else None,
                         or_width=float(or_obj.or_width) if or_obj.is_valid else None,
                     )
                     freeze_recorded = True
+
             if not or_obj.is_valid:
                 logger.warning(
                     "Session %s has invalid OR; skipping session trading.",
@@ -208,7 +227,7 @@ class BacktestEngine:
                 continue
 
             # 2. Sequential bar replay
-            active_position: Optional[Position] = None
+            active_position: Position | None = None
             session_trades_count = 0
             session_start_capital = current_capital
             max_trades = self.config.strategy.max_trades_per_day
@@ -219,7 +238,8 @@ class BacktestEngine:
                     cancelled = True
                     logger.info(
                         "Cancellation acknowledged at bar %d of session %s.",
-                        bar_num, session_id_str,
+                        bar_num,
+                        session_id_str,
                     )
                     break
                 record_bar(bar)
@@ -239,11 +259,17 @@ class BacktestEngine:
                     )
                     if trace is not None and closed_trade is None:
                         trace.record(
-                            "position_check", session_id=session_id_str,
-                            rule_id=RULE_EXIT_BRACKET, outcome="held",
-                            stop_loss=active_position.stop_loss, take_profit=active_position.take_profit,
-                            high=high_p, low=low_p, close=close_p,
-                            bar_start=str(ts), available_at=str(ts + pd.Timedelta(minutes=bar_minutes)),
+                            "position_check",
+                            session_id=session_id_str,
+                            rule_id=RULE_EXIT_BRACKET,
+                            outcome="held",
+                            stop_loss=active_position.stop_loss,
+                            take_profit=active_position.take_profit,
+                            high=high_p,
+                            low=low_p,
+                            close=close_p,
+                            bar_start=str(ts),
+                            available_at=str(ts + pd.Timedelta(minutes=bar_minutes)),
                         )
                     if closed_trade is not None:
                         all_trades.append(closed_trade)
@@ -255,9 +281,12 @@ class BacktestEngine:
                                 "trade_closed",
                                 session_id=session_id_str,
                                 trade_id=closed_trade.trade_id,
-                                rule_id=RULE_FLATTEN
-                                if reason == "EOD" and bool(bar.get("is_force_exit", False))
-                                else RULE_EXIT_BRACKET,
+                                rule_id=(
+                                    RULE_FLATTEN
+                                    if reason == "EOD"
+                                    and bool(bar.get("is_force_exit", False))
+                                    else RULE_EXIT_BRACKET
+                                ),
                                 trade=closed_trade.to_dict(),
                                 exit_reason=reason,
                                 exit_price=float(closed_trade.exit_price),
@@ -268,7 +297,8 @@ class BacktestEngine:
                                 ),
                             )
 
-                # If flat and inside trading window (and haven't exceeded daily trade limit)
+                # If flat and inside trading window
+                # (and haven't exceeded daily trade limit)
                 elif not is_or and not is_fe and session_trades_count < max_trades:
                     # Check for breakout signal on bar close
                     # We evaluate bar breakout against frozen OR
@@ -279,19 +309,18 @@ class BacktestEngine:
                             session_id=session_id_str,
                             rule_id=RULE_BREAKOUT_CLOSE,
                             bar_start=str(ts),
-                            available_at=str(
-                                ts + pd.Timedelta(minutes=bar_minutes)
+                            available_at=str(ts + pd.Timedelta(minutes=bar_minutes)),
+                            breakout_buffer=float(
+                                or_obj.or_width
+                                * self.config.strategy.breakout_buffer_pct
                             ),
-                            breakout_buffer=float(or_obj.or_width * self.config.strategy.breakout_buffer_pct),
                             direction_mode=self.config.strategy.direction_mode,
                             target_r=float(self.config.strategy.target_r),
                             close=close_p,
                             or_high=float(or_obj.or_high),
                             or_low=float(or_obj.or_low),
                             outcome="accepted" if signal is not None else "rejected",
-                            reason="breakout"
-                            if signal is not None
-                            else "no_breakout",
+                            reason="breakout" if signal is not None else "no_breakout",
                             direction=signal.direction if signal is not None else None,
                         )
                     if signal is not None:
@@ -304,9 +333,15 @@ class BacktestEngine:
                         )
                         if pos is None and trace is not None:
                             trace.record(
-                                "execution_rejected", session_id=session_id_str,
-                                rule_id=RULE_BREAKOUT_CLOSE, outcome="rejected", reason="zero_size",
-                                bar_start=str(ts), available_at=str(ts + pd.Timedelta(minutes=bar_minutes)),
+                                "execution_rejected",
+                                session_id=session_id_str,
+                                rule_id=RULE_BREAKOUT_CLOSE,
+                                outcome="rejected",
+                                reason="zero_size",
+                                bar_start=str(ts),
+                                available_at=str(
+                                    ts + pd.Timedelta(minutes=bar_minutes)
+                                ),
                             )
                         if pos is not None:
                             active_position = pos
@@ -419,9 +454,15 @@ class BacktestEngine:
                 # Partial session retained as computed; not counted complete.
                 break
             completed_sessions += 1
-            _emit({"event_type": "session_completed", "session_id": session_id_str,
-                   "completed_sessions": completed_sessions, "total_sessions": total_sessions,
-                   "trades_so_far": len(all_trades)})
+            _emit(
+                {
+                    "event_type": "session_completed",
+                    "session_id": session_id_str,
+                    "completed_sessions": completed_sessions,
+                    "total_sessions": total_sessions,
+                    "trades_so_far": len(all_trades),
+                }
+            )
 
         # Assemble Output DataFrames
         trades_df = (
@@ -469,7 +510,7 @@ class BacktestEngine:
         self,
         bar: pd.Series,
         opening_range: OpeningRange,
-    ) -> Optional[Signal]:
+    ) -> Signal | None:
         """Evaluates single bar close against OR boundaries.
 
         Delegates to the shared :func:`evaluate_bar_signal` domain function
@@ -495,7 +536,7 @@ class BacktestEngine:
         capital: float,
         trade_id: int,
         bar: pd.Series,
-    ) -> Optional[Position]:
+    ) -> Position | None:
         """Calculates sizing and creates active Position with execution frictions."""
         shares = self.execution_model.calculate_position_size(
             capital=capital,
@@ -537,7 +578,7 @@ class BacktestEngine:
         self,
         bar: pd.Series,
         position: Position,
-    ) -> Tuple[Optional[Position], Optional[Trade]]:
+    ) -> tuple[Position | None, Trade | None]:
         """Evaluates bar high/low against position TP and SL brackets.
 
         Conservative Dual-Touch Rule:
@@ -561,7 +602,8 @@ class BacktestEngine:
             # Dual touch or pure Stop -> STOP LOSS FIRST
             if hit_stop and hit_target:
                 logger.debug(
-                    "Dual-touch bar detected on LONG position; resolving conservatively to STOP."
+                    "Dual-touch bar detected on LONG position; "
+                    "resolving conservatively to STOP."
                 )
                 closed = self._execute_exit(
                     position, ts, position.stop_loss, ExitReason.STOP
@@ -585,7 +627,8 @@ class BacktestEngine:
             # Dual touch or pure Stop -> STOP LOSS FIRST
             if hit_stop and hit_target:
                 logger.debug(
-                    "Dual-touch bar detected on SHORT position; resolving conservatively to STOP."
+                    "Dual-touch bar detected on SHORT position; "
+                    "resolving conservatively to STOP."
                 )
                 closed = self._execute_exit(
                     position, ts, position.stop_loss, ExitReason.STOP

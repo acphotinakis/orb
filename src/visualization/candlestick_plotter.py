@@ -10,17 +10,16 @@ entry/exit points, Stop Loss, Take Profit lines, and trade outcome annotations.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Union
+
 import matplotlib
 
 matplotlib.use("Agg")  # Non-interactive headless backend
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import pandas as pd
-import numpy as np
+import matplotlib.pyplot as plt  # noqa: E402
+import pandas as pd  # noqa: E402
+from matplotlib import patches  # noqa: E402
 
-from src.backtest.models import Trade
-from src.common.logger import get_logger
+from src.backtest.models import Trade  # noqa: E402
+from src.common.logger import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -30,7 +29,7 @@ class CandlestickTradePlotter:
 
     def __init__(
         self,
-        output_dir: Optional[Union[str, Path]] = None,
+        output_dir: str | Path | None = None,
     ) -> None:
         """Initialise the CandlestickTradePlotter.
 
@@ -48,7 +47,7 @@ class CandlestickTradePlotter:
         self,
         trade: Trade,
         session_df: pd.DataFrame,
-        filename: Optional[str] = None,
+        filename: str | None = None,
     ) -> Path:
         """Plots single session candlestick chart with complete trade annotations.
 
@@ -72,7 +71,6 @@ class CandlestickTradePlotter:
         )
 
         n_bars = len(df)
-        indices = np.arange(n_bars)
 
         # Plot Candlesticks
         width = 0.6
@@ -120,7 +118,7 @@ class CandlestickTradePlotter:
 
         # 1. Opening Range High/Low lines & shaded box (first 15 bars: 0..14)
         or_mask = (
-            df["is_opening_range"] == True
+            df["is_opening_range"]
             if "is_opening_range" in df.columns
             else (df.index < 15)
         )
@@ -210,10 +208,17 @@ class CandlestickTradePlotter:
         # Title & Outcome banner
         is_win = trade.pnl_dollars > 0
         outcome_color = "#1b5e20" if is_win else "#b71c1c"
-        outcome_text = f"{'WIN' if is_win else 'LOSS'} ({trade.r_multiple:+.2f}R | ${trade.pnl_dollars:+,.2f})"
+        win_label = "WIN" if is_win else "LOSS"
+        outcome_text = (
+            f"{win_label} ({trade.r_multiple:+.2f}R | ${trade.pnl_dollars:+,.2f})"
+        )
 
+        trade_title = (
+            f"Trade #{trade.trade_id} [{trade.date}] "
+            f"{trade.symbol} {trade.direction} — {outcome_text}"
+        )
         ax.set_title(
-            f"Trade #{trade.trade_id} [{trade.date}] {trade.symbol} {trade.direction} — {outcome_text}",
+            trade_title,
             fontsize=13,
             fontweight="bold",
             color=outcome_color,
@@ -248,12 +253,12 @@ class CandlestickTradePlotter:
 
     def plot_all_trades(
         self,
-        trades: List[Trade],
+        trades: list[Trade],
         processed_bars: pd.DataFrame,
-        max_plots: Optional[int] = None,
-    ) -> List[Path]:
+        max_plots: int | None = None,
+    ) -> list[Path]:
         """Generates trade charts for all executed trades."""
-        output_paths: List[Path] = []
+        output_paths: list[Path] = []
         trades_to_plot = trades[:max_plots] if max_plots else trades
 
         grouped = processed_bars.groupby("session_id")

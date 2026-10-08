@@ -12,7 +12,7 @@ single-trade-per-session constraint.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, List, Dict
+
 import pandas as pd
 
 from src.common.config import StrategyConfig
@@ -55,7 +55,8 @@ class Signal:
     def __str__(self) -> str:
         return (
             f"Signal({self.symbol} {self.direction} @ {self.entry_price:.2f} "
-            f"SL={self.stop_loss:.2f} TP={self.take_profit:.2f} 1R={self.risk_amount:.2f} "
+            f"SL={self.stop_loss:.2f} TP={self.take_profit:.2f} "
+            f"1R={self.risk_amount:.2f} "
             f"time={self.timestamp.strftime('%Y-%m-%d %H:%M:%S%z')})"
         )
 
@@ -71,9 +72,9 @@ def evaluate_bar_signal(
     or_width: float,
     direction_mode: str,
     target_r: float,
-    buffer: Optional[float] = None,
+    buffer: float | None = None,
     breakout_buffer_pct: float = 0.0,
-) -> Optional[Signal]:
+) -> Signal | None:
     """Shared single-bar breakout decision (P4-O1).
 
     The one canonical close-breakout rule used by both the backtest engine
@@ -102,9 +103,7 @@ def evaluate_bar_signal(
     buffer_val = buffer if buffer is not None else or_width * breakout_buffer_pct
 
     # Long breakout
-    if direction_mode in ("both", "long_only") and close_price > (
-        or_high + buffer_val
-    ):
+    if direction_mode in ("both", "long_only") and close_price > (or_high + buffer_val):
         stop_loss = or_low
         risk_amount = close_price - stop_loss
         if risk_amount <= 0:
@@ -154,7 +153,7 @@ def evaluate_bar_signal(
 class SignalGenerator:
     """Evaluates trading bars sequentially against frozen OpeningRange."""
 
-    def __init__(self, config: StrategyConfig, buffer: Optional[float] = None) -> None:
+    def __init__(self, config: StrategyConfig, buffer: float | None = None) -> None:
         self._config = config
         # If buffer is not explicitly passed, compute or default using config
         self._buffer = buffer
@@ -163,7 +162,7 @@ class SignalGenerator:
         self,
         session_bars: pd.DataFrame,
         opening_range: OpeningRange,
-    ) -> Optional[Signal]:
+    ) -> Signal | None:
         """Evaluates session trading bars sequentially.
 
         Returns first valid Signal or None if no breakout occurs.
@@ -180,9 +179,7 @@ class SignalGenerator:
         # Filter strictly to trading window bars
         # Note: TASK-008 tagged `is_trading_window` True for [09:45, 15:59)
         if "is_trading_window" in session_bars.columns:
-            trading_bars = session_bars[
-                session_bars["is_trading_window"] == True
-            ].copy()
+            trading_bars = session_bars[session_bars["is_trading_window"]].copy()
         else:
             # Fallback based on minute_of_day if is_trading_window not present
             or_mins = self._config.opening_range_minutes
@@ -228,10 +225,10 @@ class SignalGenerator:
     def generate_all_signals(
         self,
         df: pd.DataFrame,
-        opening_ranges: Dict[str, OpeningRange],
-    ) -> Dict[str, Signal]:
+        opening_ranges: dict[str, OpeningRange],
+    ) -> dict[str, Signal]:
         """Generates signals for all sessions in the dataset."""
-        signals: Dict[str, Signal] = {}
+        signals: dict[str, Signal] = {}
         grouped = df.groupby("session_id")
 
         for session_id, session_bars in grouped:

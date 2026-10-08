@@ -10,16 +10,15 @@ or multi-day date ranges without requiring executed Trade objects.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Union
+
 import matplotlib
 
 matplotlib.use("Agg")  # Non-interactive headless backend
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import pandas as pd
-import numpy as np
+import matplotlib.pyplot as plt  # noqa: E402
+import pandas as pd  # noqa: E402
+from matplotlib import patches  # noqa: E402
 
-from src.common.logger import get_logger
+from src.common.logger import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -29,8 +28,8 @@ class CandlestickDataPlotter:
 
     def __init__(
         self,
-        output_dir: Optional[Union[str, Path]] = None,
-        filename: Optional[str] = None,
+        output_dir: str | Path | None = None,
+        filename: str | None = None,
     ) -> None:
         """Initialise the CandlestickDataPlotter.
 
@@ -50,18 +49,21 @@ class CandlestickDataPlotter:
         self,
         df: pd.DataFrame,
         symbol: str = "SPY",
-        title: Optional[str] = None,
-        filename: Optional[str] = None,
+        title: str | None = None,
+        filename: str | None = None,
         highlight_opening_range: bool = True,
     ) -> Path:
-        """Plots a single session candlestick chart with volume and saves to PNG file.
+        """Plots a single session candlestick chart with volume and saves to PNG.
 
         Args:
-            df: DataFrame containing at least ['timestamp', 'open', 'high', 'low', 'close', 'volume'].
+            df: DataFrame containing at least
+                ['timestamp', 'open', 'high', 'low', 'close', 'volume'].
             symbol: Ticker symbol. Defaults to "SPY".
             title: Optional custom plot title.
-            filename: Optional custom output filename. If None, uses instance default or auto-generated name.
-            highlight_opening_range: If True and 'is_opening_range' column exists, highlights the OR window.
+            filename: Optional custom output filename. If None, uses instance
+                default or auto-generated name.
+            highlight_opening_range: If True and 'is_opening_range' column exists,
+                highlights the OR window.
 
         Returns:
             Path to saved PNG file.
@@ -87,7 +89,6 @@ class CandlestickDataPlotter:
         )
 
         n_bars = len(data)
-        indices = np.arange(n_bars)
 
         # Candlestick bar widths
         width = 0.6
@@ -152,7 +153,7 @@ class CandlestickDataPlotter:
 
         # Optional: Highlight opening range if metadata present
         if highlight_opening_range and "is_opening_range" in data.columns:
-            or_bars = data[data["is_opening_range"] == True]
+            or_bars = data[data["is_opening_range"]]
             if not or_bars.empty:
                 or_start_idx = or_bars.index[0]
                 or_end_idx = or_bars.index[-1]
@@ -192,7 +193,7 @@ class CandlestickDataPlotter:
         if (
             highlight_opening_range
             and "is_opening_range" in data.columns
-            and not data[data["is_opening_range"] == True].empty
+            and not data[data["is_opening_range"]].empty
         ):
             ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
 
@@ -232,8 +233,8 @@ class CandlestickDataPlotter:
         df: pd.DataFrame,
         stage: str,  # e.g., "raw", "cleaned", or "processed"
         symbol: str = "SPY",
-        max_plots: Optional[int] = None,
-    ) -> List[Path]:
+        max_plots: int | None = None,
+    ) -> list[Path]:
         """Plots candlestick charts grouped by session_id.
 
         Args:
@@ -244,7 +245,7 @@ class CandlestickDataPlotter:
         Returns:
             List of Paths to saved PNG figures.
         """
-        output_paths: List[Path] = []
+        output_paths: list[Path] = []
         if "session_id" not in df.columns:
             # For raw bars where session_id hasn't been tagged yet
             p = self.plot_session(

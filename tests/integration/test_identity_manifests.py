@@ -25,7 +25,9 @@ def _seed_raw_cache(base_dir: Path, dates=("2024-01-02", "2024-01-03")) -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
     bars = []
     for d in dates:
-        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert("UTC")
+        open_utc = pd.Timestamp(f"{d} 09:30:00", tz="America/New_York").tz_convert(
+            "UTC"
+        )
         ts = pd.date_range(start=open_utc, periods=391, freq="1min")
         n = len(ts)
         opens = np.full(n, 500.0)
@@ -40,14 +42,24 @@ def _seed_raw_cache(base_dir: Path, dates=("2024-01-02", "2024-01-03")) -> None:
             highs[16] = 501.6
             closes[25] = 506.6
             highs[25] = 507.0
-        bars.append(pd.DataFrame({
-            "timestamp": ts, "open": opens, "high": highs, "low": lows,
-            "close": closes, "volume": vols,
-        }))
+        bars.append(
+            pd.DataFrame(
+                {
+                    "timestamp": ts,
+                    "open": opens,
+                    "high": highs,
+                    "low": lows,
+                    "close": closes,
+                    "volume": vols,
+                }
+            )
+        )
     combined = pd.concat(bars, ignore_index=True)
     combined.to_parquet(
         raw_dir / "SPY_1Min_20240102_20240103.parquet",
-        engine="pyarrow", compression="zstd", index=False,
+        engine="pyarrow",
+        compression="zstd",
+        index=False,
     )
 
 
@@ -89,7 +101,10 @@ def test_same_label_twice_yields_distinct_uuid_runs(tmp_path):
     _seed_raw_cache(tmp_path)
     r1 = _run(tmp_path, None, label="same")
     r2 = _run(tmp_path, None, label="same")
-    assert r1.metrics["trade_metrics"]["total_trades"] == r2.metrics["trade_metrics"]["total_trades"]
+    assert (
+        r1.metrics["trade_metrics"]["total_trades"]
+        == r2.metrics["trade_metrics"]["total_trades"]
+    )
     dirs = sorted((tmp_path / "experiments").iterdir())
     assert len(dirs) == 2
     assert dirs[0].name != dirs[1].name
@@ -111,17 +126,19 @@ def test_identical_rerun_reproduces_metrics_and_shares_dataset(tmp_path):
     """T13: same inputs rerun → equal metrics, same identity directory."""
     _seed_raw_cache(tmp_path)
     _run(tmp_path, "runA")
-    proc_a = (_exp_dir(tmp_path, "runA") / "manifest.json")
+    proc_a = _exp_dir(tmp_path, "runA") / "manifest.json"
     manifest_a = json.loads(proc_a.read_text())
     _run(tmp_path, "runB")
     manifest_b = json.loads((_exp_dir(tmp_path, "runB") / "manifest.json").read_text())
 
     for key in ("total_pnl_dollars", "total_trades"):
-        assert (
-            manifest_a["artifacts"] and manifest_b["artifacts"]
-        )
-    metrics_a = json.loads((_exp_dir(tmp_path, "runA") / "results" / "metrics.json").read_text())
-    metrics_b = json.loads((_exp_dir(tmp_path, "runB") / "results" / "metrics.json").read_text())
+        assert manifest_a["artifacts"] and manifest_b["artifacts"]
+    metrics_a = json.loads(
+        (_exp_dir(tmp_path, "runA") / "results" / "metrics.json").read_text()
+    )
+    metrics_b = json.loads(
+        (_exp_dir(tmp_path, "runB") / "results" / "metrics.json").read_text()
+    )
     assert metrics_a["trade_metrics"] == metrics_b["trade_metrics"]
     assert metrics_a["portfolio_metrics"] == metrics_b["portfolio_metrics"]
     # Same identity → same immutable dataset directory (cache hit, not rebuild).
@@ -140,7 +157,9 @@ def test_old_run_stable_after_new_inputs(tmp_path):
     _seed_raw_cache(tmp_path)
     _run(tmp_path, "runA")
     dir_a = _exp_dir(tmp_path, "runA")
-    processed_rel = json.loads((dir_a / "manifest.json").read_text())["datasets"]["processed"]["path"]
+    processed_rel = json.loads((dir_a / "manifest.json").read_text())["datasets"][
+        "processed"
+    ]["path"]
     processed_a = tmp_path / processed_rel
     bytes_before = processed_a.read_bytes()
     metrics_before = (dir_a / "results" / "metrics.json").read_text()

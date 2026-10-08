@@ -20,7 +20,6 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -30,7 +29,6 @@ try:
 
     matplotlib.use("Agg")  # non-interactive backend, safe for headless/CLI runs
     import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
 
     _MATPLOTLIB_AVAILABLE = True
 except ImportError:
@@ -58,15 +56,15 @@ except ImportError:
 @dataclass
 class Trade:
     entry_time: pd.Timestamp
-    exit_time: Optional[pd.Timestamp] = None
+    exit_time: pd.Timestamp | None = None
     direction: str = ""  # "LONG" or "SHORT"
     entry_price: float = 0.0
-    exit_price: Optional[float] = None
+    exit_price: float | None = None
     stop_loss: float = 0.0
     take_profit: float = 0.0
     exit_reason: str = ""  # "TP", "SL", "REVERSAL", "EOD"
-    pnl: Optional[float] = None
-    return_pct: Optional[float] = None
+    pnl: float | None = None
+    return_pct: float | None = None
     shares: int = 0
 
     def close(self, exit_time: pd.Timestamp, exit_price: float, reason: str) -> None:
@@ -103,7 +101,7 @@ class Position:
 class AlpacaDataFetcher:
     """Thin wrapper around alpaca-py to pull historical 1-minute bars."""
 
-    def __init__(self, api_key: Optional[str] = None, secret_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, secret_key: str | None = None):
         self.api_key = api_key
         self.secret_key = secret_key
         self._client = None
@@ -185,7 +183,7 @@ class EmaStrategyBacktester:
         self.consecutive_losses: int = 0
         self.max_consecutive_loss_streak: int = 0
         self.circuit_breaker_tripped: bool = False
-        self.position: Optional[Position] = None
+        self.position: Position | None = None
 
     # ----------------------------------------------------------------
     # Data preparation
@@ -272,10 +270,9 @@ class EmaStrategyBacktester:
         self.position = None
         self.trades = []
 
-        for i, row in df.iterrows():
+        for _i, row in df.iterrows():
             ts = row["timestamp"]
-            o, h, l, c = row["open"], row["high"], row["low"], row["close"]
-            atr = row["atr"]
+            c = row["close"]
 
             # ---- 1. Manage an existing open position first (intrabar) ----
             if self.position is not None:
@@ -312,11 +309,11 @@ class EmaStrategyBacktester:
     def _evaluate_open_position(self, row: pd.Series) -> None:
         """Check SL/TP against the current bar's High/Low for intrabar fills."""
         pos = self.position
-        h, l, ts = row["high"], row["low"], row["timestamp"]
+        bar_high, bar_low, ts = row["high"], row["low"], row["timestamp"]
 
         if pos.direction == "LONG":
-            hit_sl = l <= pos.stop_loss
-            hit_tp = h >= pos.take_profit
+            hit_sl = bar_low <= pos.stop_loss
+            hit_tp = bar_high >= pos.take_profit
             if hit_sl and hit_tp:
                 # Conservative assumption: stop-loss triggers first intrabar
                 self._close_position(ts, pos.stop_loss, "SL")
@@ -325,11 +322,9 @@ class EmaStrategyBacktester:
             elif hit_tp:
                 self._close_position(ts, pos.take_profit, "TP")
         else:  # SHORT
-            hit_sl = h >= pos.stop_loss
-            hit_tp = l <= pos.take_profit
-            if hit_sl and hit_tp:
-                self._close_position(ts, pos.stop_loss, "SL")
-            elif hit_sl:
+            hit_sl = bar_high >= pos.stop_loss
+            hit_tp = bar_low <= pos.take_profit
+            if hit_sl and hit_tp or hit_sl:
                 self._close_position(ts, pos.stop_loss, "SL")
             elif hit_tp:
                 self._close_position(ts, pos.take_profit, "TP")
@@ -361,7 +356,8 @@ class EmaStrategyBacktester:
             return  # halt new entries until manual reset / regime change
 
         if self.position is not None:
-            return  # already in a (freshly reversed-out or same-direction) flat state check
+            # already in a flat state check
+            return
 
         # --- New entry ---
         if bullish:
@@ -552,13 +548,15 @@ class PerformanceReport:
         line = "=" * 62
         print(line)
         print(
-            f" 9/21 EMA INSTITUTIONAL BACKTEST REPORT  |  {symbol}  |  {self.bt.timeframe}"
+            f" 9/21 EMA INSTITUTIONAL BACKTEST REPORT | {symbol} | "
+            f"{self.bt.timeframe}"
         )
         print(line)
         print(f" Initial Capital ......... {money(stats['initial_capital'])}")
         print(f" Final Equity ............ {money(stats['final_equity'])}")
         print(
-            f" Total Net P&L ........... {money(stats['net_pnl'])}  ({stats['net_pnl_pct']:.2f}%)"
+            f" Total Net P&L ........... {money(stats['net_pnl'])} "
+            f"({stats['net_pnl_pct']:.2f}%)"
         )
         print("-" * 62)
         print(f" Total Trades ............ {stats['total_trades']}")
@@ -566,17 +564,16 @@ class PerformanceReport:
         print(f" Losing Trades ........... {stats['losing_trades']}")
         print(f" Win Rate ................ {stats['win_rate']:.2f}%")
         pf = stats["profit_factor"]
-        print(
-            f" Profit Factor ........... {'inf' if pf == float('inf') else f'{pf:.2f}'}"
-        )
+        pf_str = "inf" if pf == float("inf") else f"{pf:.2f}"
+        print(f" Profit Factor ........... {pf_str}")
         wlr = stats["win_loss_ratio"]
-        print(
-            f" Win/Loss Ratio .......... {'inf' if wlr == float('inf') else f'{wlr:.2f}'}"
-        )
+        wlr_str = "inf" if wlr == float("inf") else f"{wlr:.2f}"
+        print(f" Win/Loss Ratio .......... {wlr_str}")
         print(f" Avg P&L per Trade ....... {money(stats['avg_pnl_per_trade'])}")
         print("-" * 62)
         print(
-            f" Max Drawdown ............ {money(stats['max_drawdown_dollar'])}  ({stats['max_drawdown_pct']:.2f}%)"
+            f" Max Drawdown ............ {money(stats['max_drawdown_dollar'])} "
+            f"({stats['max_drawdown_pct']:.2f}%)"
         )
         print(f" Annualized Sharpe Ratio . {stats['sharpe_ratio']:.2f}")
         print(f" Max Consecutive Losses .. {stats['max_consecutive_loss_streak']}")
@@ -824,7 +821,8 @@ class PlotGenerator:
             )
 
         ax.set_title(
-            f"{self.bt.symbol} — Price, EMA 9/21 Crossovers & Trade Markers ({self.bt.timeframe})",
+            f"{self.bt.symbol} — Price, EMA 9/21 Crossovers & "
+            f"Trade Markers ({self.bt.timeframe})",
             fontsize=12,
             fontweight="bold",
         )
@@ -1026,12 +1024,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--generate-demo-data",
         action="store_true",
-        help="Generate synthetic data and save to --csv path if no data source is found",
+        help="Generate synthetic data and save to --csv path if no source is found",
     )
     p.add_argument(
         "--plot",
         action="store_true",
-        help="Generate and save backtest plots (equity curve, price/trades, P&L distribution)",
+        help="Generate backtest plots (equity curve, price/trades, P&L distribution)",
     )
     p.add_argument(
         "--plot-dir",
@@ -1063,7 +1061,8 @@ def main():
         end = datetime.utcnow()
         start = end - timedelta(days=args.days)
         print(
-            f"Fetching {args.symbol} 1-min bars from Alpaca ({start.date()} -> {end.date()})..."
+            f"Fetching {args.symbol} 1-min bars from Alpaca "
+            f"({start.date()} -> {end.date()})..."
         )
         raw_df = fetcher.fetch_1min_bars(args.symbol, start, end)
     else:
@@ -1073,7 +1072,8 @@ def main():
             raw_df = load_csv_data(str(csv_path))
         elif args.generate_demo_data:
             print(
-                f"No CSV found at {csv_path}. Generating synthetic demo data ({args.days} days)..."
+                f"No CSV found at {csv_path}. "
+                f"Generating demo data ({args.days} days)..."
             )
             raw_df = generate_synthetic_data(args.symbol, days=args.days)
             raw_df.to_csv(csv_path, index=False)
@@ -1124,7 +1124,8 @@ def main():
     if args.plot:
         if not _MATPLOTLIB_AVAILABLE:
             print(
-                "\nmatplotlib is not installed — skipping plots. Run: pip install matplotlib",
+                "\nmatplotlib is not installed — skipping plots. "
+                "Run: pip install matplotlib",
                 file=sys.stderr,
             )
         else:

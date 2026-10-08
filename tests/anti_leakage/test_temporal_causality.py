@@ -5,14 +5,9 @@ Causality audit test suite proving zero lookahead bias, immutability,
 and strict temporal ordering across the SPY ORB system.
 """
 
-import pytest
-import pandas as pd
-import numpy as np
-
+from src.backtest.engine import BacktestEngine
 from src.strategy.opening_range import OpeningRangeCalculator
 from src.strategy.signals import SignalGenerator
-from src.backtest.engine import BacktestEngine
-from src.common.exceptions import TemporalLeakageError
 
 
 def test_opening_range_future_invariance(synthetic_rth_bars):
@@ -34,7 +29,9 @@ def test_opening_range_future_invariance(synthetic_rth_bars):
 
 
 def test_signal_future_invariance(synthetic_rth_bars, mock_app_config):
-    """Proves that future price paths after a signal do not alter past signal decisions."""
+    """Proves that future price paths after a signal do not alter past
+    signal decisions.
+    """
     calc = OpeningRangeCalculator(or_minutes=15)
     or_obj = calc.calculate_session_or(synthetic_rth_bars)
 
@@ -58,7 +55,9 @@ def test_signal_future_invariance(synthetic_rth_bars, mock_app_config):
 
 
 def test_streaming_vs_batch_equivalence(synthetic_rth_bars, mock_app_config):
-    """Proves that sequential incremental bar evaluation produces identical results to batch execution."""
+    """Proves that sequential incremental bar evaluation produces identical
+    results to batch execution.
+    """
     df = synthetic_rth_bars.copy()
     df.loc[16, "close"] = 501.5
     df.loc[25, "high"] = 507.0

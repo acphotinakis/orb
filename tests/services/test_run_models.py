@@ -130,9 +130,7 @@ def test_unknown_keys_rejected(tmp_path):
     with pytest.raises(ConfigurationError):
         build_run_request(path, config_overrides={"nope": {"x": 1}})
     with pytest.raises(ConfigurationError):
-        build_run_request(
-            path, config_overrides={"strategy": {"targer_r": 2.0}}
-        )
+        build_run_request(path, config_overrides={"strategy": {"targer_r": 2.0}})
     with pytest.raises(ConfigurationError):
         build_run_request(path, options={"bogus_option": 1})
 
@@ -189,24 +187,14 @@ def test_impossible_and_reversed_dates_rejected(tmp_path):
 
 
 def test_impossible_clock_rejected(tmp_path):
-    _expect_error(
-        tmp_path, overrides={"strategy": {"force_exit_time": "24:00:00"}}
-    )
-    _expect_error(
-        tmp_path, overrides={"strategy": {"force_exit_time": "15:61:00"}}
-    )
+    _expect_error(tmp_path, overrides={"strategy": {"force_exit_time": "24:00:00"}})
+    _expect_error(tmp_path, overrides={"strategy": {"force_exit_time": "15:61:00"}})
 
 
 def test_non_finite_and_mistyped_numbers_rejected(tmp_path):
-    _expect_error(
-        tmp_path, overrides={"strategy": {"target_r": math.nan}}
-    )
-    _expect_error(
-        tmp_path, overrides={"strategy": {"target_r": math.inf}}
-    )
-    _expect_error(
-        tmp_path, overrides={"strategy": {"opening_range_minutes": True}}
-    )
+    _expect_error(tmp_path, overrides={"strategy": {"target_r": math.nan}})
+    _expect_error(tmp_path, overrides={"strategy": {"target_r": math.inf}})
+    _expect_error(tmp_path, overrides={"strategy": {"opening_range_minutes": True}})
     _expect_error(tmp_path, overrides={"strategy": {"ticker": 123}})
 
 
@@ -217,9 +205,7 @@ def test_string_booleans_rejected(tmp_path):
 
 
 def test_invalid_enum_and_timeframe_rejected(tmp_path):
-    _expect_error(
-        tmp_path, overrides={"strategy": {"direction_mode": "sideways"}}
-    )
+    _expect_error(tmp_path, overrides={"strategy": {"direction_mode": "sideways"}})
     _expect_error(tmp_path, overrides={"data": {"timeframe": "BogusTF"}})
 
 
@@ -233,9 +219,7 @@ def test_unsupported_controls_rejected_with_field_errors(tmp_path):
     assert "strategy.breakout_confirmation" in str(exc.value)
 
     with pytest.raises(ConfigurationError) as exc:
-        build_run_request(
-            path, config_overrides={"strategy": {"stop_method": "atr"}}
-        )
+        build_run_request(path, config_overrides={"strategy": {"stop_method": "atr"}})
     assert "strategy.stop_method" in str(exc.value)
 
     with pytest.raises(ConfigurationError) as exc:

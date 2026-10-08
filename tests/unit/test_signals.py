@@ -5,8 +5,9 @@ Unit tests for ORB Breakout Signal Generation Engine.
 """
 
 import pandas as pd
-from src.strategy.signals import SignalGenerator, Signal
+
 from src.strategy.opening_range import OpeningRange
+from src.strategy.signals import Signal, SignalGenerator
 
 
 def test_long_signal_generation(synthetic_rth_bars, mock_app_config):
@@ -54,5 +55,5 @@ def test_no_signal_during_opening_range(synthetic_rth_bars, mock_app_config):
     df.loc[5, "close"] = 505.0
 
     gen = SignalGenerator(mock_app_config.strategy)
-    sig = gen.evaluate_session_signals(df[df["is_opening_range"] == True], or_obj)
+    sig = gen.evaluate_session_signals(df[df["is_opening_range"]], or_obj)
     assert sig is None

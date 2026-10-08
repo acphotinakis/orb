@@ -4,12 +4,13 @@ tests/unit/test_backtest_engine.py
 Unit tests for event-driven backtesting engine and dual-touch resolver.
 """
 
-import pandas as pd
 from src.backtest.engine import BacktestEngine
 from src.backtest.models import ExitReason
 
 
-def test_dual_touch_resolution_stops_out_conservatively(synthetic_rth_bars, mock_app_config):
+def test_dual_touch_resolution_stops_out_conservatively(
+    synthetic_rth_bars, mock_app_config
+):
     df = synthetic_rth_bars.copy()
     # Trigger breakout at bar 16 (09:46): Close = 501.5 (> OR High 501.0)
     # Entry = 501.51, Stop = 499.0, Target = 506.5

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -38,6 +38,7 @@ class SessionConfig:
         max_trades: Maximum simulated trades per session.
         force_exit_time: HH:MM:SS ET -- hard flatten time.
     """
+
     or_minutes: int = 15
     bar_minutes: int = 1
     direction_mode: str = "both"
@@ -63,6 +64,7 @@ class MonitorSignal:
         or_low: Frozen session OR low.
         is_simulated: Always True; never a real broker order.
     """
+
     session_id: str
     bar_start: pd.Timestamp
     direction: str
@@ -94,19 +96,20 @@ class MonitorState:
         degraded: True when history is incomplete; no new signals issued.
         degraded_reason: Human-readable reason.
     """
+
     session_id: str
-    or_high: Optional[float] = None
-    or_low: Optional[float] = None
+    or_high: float | None = None
+    or_low: float | None = None
     or_frozen: bool = False
     or_valid: bool = False
     bars_observed: int = 0
     trades_this_session: int = 0
-    open_signal: Optional[MonitorSignal] = None
-    closed_signals: Tuple[MonitorSignal, ...] = ()
+    open_signal: MonitorSignal | None = None
+    closed_signals: tuple[MonitorSignal, ...] = ()
     realized_pnl_sim: float = 0.0
-    last_bar_start: Optional[pd.Timestamp] = None
+    last_bar_start: pd.Timestamp | None = None
     degraded: bool = False
-    degraded_reason: Optional[str] = None
+    degraded_reason: str | None = None
 
 
 def new_session(session_id: str) -> MonitorState:
@@ -125,7 +128,7 @@ def _minute_of_day(bar_start: pd.Timestamp) -> int:
     return (ts_et.hour * 60 + ts_et.minute) - (9 * 60 + 30)
 
 
-def on_bar(state: MonitorState, bar: "RawBar", cfg: SessionConfig) -> MonitorState:
+def on_bar(state: MonitorState, bar: RawBar, cfg: SessionConfig) -> MonitorState:
     """Apply one finalized RawBar to the session state (pure function).
 
     Processing rules:
@@ -296,7 +299,9 @@ def snapshot(state: MonitorState) -> dict:
         ],
         "realized_pnl_sim": state.realized_pnl_sim,
         "last_bar_start": (
-            state.last_bar_start.isoformat() if state.last_bar_start is not None else None
+            state.last_bar_start.isoformat()
+            if state.last_bar_start is not None
+            else None
         ),
         "degraded": state.degraded,
         "degraded_reason": state.degraded_reason,

@@ -51,8 +51,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Literal
-import sys
+from typing import Literal
 
 import pandas as pd
 
@@ -130,7 +129,7 @@ def _find_covering_cache_file(
     timeframe: str,
     start_date: datetime,
     end_date: datetime,
-) -> Optional[Path]:
+) -> Path | None:
     """Search *cache_dir* for a cached file that fully covers the requested window.
 
     A file is considered covering when its encoded date range satisfies
@@ -184,7 +183,8 @@ def _load_parquet(path: Path) -> pd.DataFrame:
 
 
 def _write_parquet(df: pd.DataFrame, path: Path) -> None:
-    """Persist a bars DataFrame to Parquet using the ``pyarrow`` engine and zstd compression.
+    """Persist a bars DataFrame to Parquet using the ``pyarrow`` engine
+    and zstd compression.
 
     Args:
         df: Bars DataFrame to write.
@@ -258,8 +258,8 @@ class DataFetcher:
     def __init__(
         self,
         config: AppConfig,
-        client: Optional[AlpacaDataClient] = None,
-        cache_dir: Optional[Path] = None,
+        client: AlpacaDataClient | None = None,
+        cache_dir: Path | None = None,
     ) -> None:
         """Initialise the DataFetcher.
 
@@ -270,7 +270,7 @@ class DataFetcher:
                 (from PathManager), this overrides any default path logic.
         """
         self._config = config
-        self._client: Optional[AlpacaDataClient] = client
+        self._client: AlpacaDataClient | None = client
         # Accept injected path from PathManager; fall back to a sensible default
         self._cache_dir: Path = (
             cache_dir
@@ -330,8 +330,8 @@ class DataFetcher:
         self,
         symbol: str = "SPY",
         timeframe: str = "15Min",
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
         force_refresh: bool = False,
         plot_chart: bool = False,
     ) -> pd.DataFrame:

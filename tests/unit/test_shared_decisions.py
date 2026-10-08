@@ -10,7 +10,6 @@ import pandas as pd
 from src.backtest.engine import BacktestEngine
 from src.strategy.opening_range import OpeningRangeCalculator
 from src.strategy.signals import SignalGenerator, evaluate_bar_signal
-
 from tests.unit.test_accounting_reconciliation import (
     _eod_fixture_config,
     _session_frame,
@@ -109,23 +108,40 @@ def test_pre_extraction_engine_golden_parity():
     """Golden outputs captured from HEAD engine before rule extraction."""
     import json
     from pathlib import Path
+
     from src.backtest.trace import TraceCollector
-    frames=[]
-    for i,case in enumerate(['flat','long_target','short_target','dual_touch','fallback']):
-        frame=_set_or(_session_frame(date_str=f'2024-01-0{i+2}'))
-        if case != 'flat':
-            frame.loc[15,['close','high']]=[501.5,501.6]
-        if case=='long_target': frame.loc[16,'high']=507
-        if case=='short_target':
-            frame.loc[15,['close','low']]=[498.5,498]
-            frame.loc[16,'low']=493
-        if case=='dual_touch': frame.loc[16,['high','low']]=[507,498]
-        if case=='fallback':
-            frame.loc[16:,['close','high','low']]=[501.5,502,501]
+
+    frames = []
+    for i, case in enumerate(
+        ["flat", "long_target", "short_target", "dual_touch", "fallback"]
+    ):
+        frame = _set_or(_session_frame(date_str=f"2024-01-0{i+2}"))
+        if case != "flat":
+            frame.loc[15, ["close", "high"]] = [501.5, 501.6]
+        if case == "long_target":
+            frame.loc[16, "high"] = 507
+        if case == "short_target":
+            frame.loc[15, ["close", "low"]] = [498.5, 498]
+            frame.loc[16, "low"] = 493
+        if case == "dual_touch":
+            frame.loc[16, ["high", "low"]] = [507, 498]
+        if case == "fallback":
+            frame.loc[16:, ["close", "high", "low"]] = [501.5, 502, 501]
         frames.append(frame)
-    expected = json.loads((Path(__file__).parents[1] / "fixtures/phase03_engine_parity.json").read_text())
+    expected = json.loads(
+        (Path(__file__).parents[1] / "fixtures/phase03_engine_parity.json").read_text()
+    )
     for trace in (None, TraceCollector()):
-        result = BacktestEngine(_eod_fixture_config()).run(pd.concat(frames, ignore_index=True), trace=trace)
-        for key, frame in (("trades", result.trades_df), ("equity", result.equity_curve), ("daily", result.daily_summary)):
-            assert json.loads(frame.to_json(orient="split", date_format="iso")) == expected[key]
+        result = BacktestEngine(_eod_fixture_config()).run(
+            pd.concat(frames, ignore_index=True), trace=trace
+        )
+        for key, frame in (
+            ("trades", result.trades_df),
+            ("equity", result.equity_curve),
+            ("daily", result.daily_summary),
+        ):
+            assert (
+                json.loads(frame.to_json(orient="split", date_format="iso"))
+                == expected[key]
+            )
         assert result.final_capital == expected["final_capital"]

@@ -19,20 +19,16 @@ Usage
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
-from src.common.logger import get_logger
+from typing import Any
 
 import yaml
 
+from src.common.exceptions import ConfigurationError
+from src.common.logger import get_logger
+
 logger = get_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# Domain exception — imported from canonical hierarchy (TASK-004).
-# ---------------------------------------------------------------------------
-
-from src.common.exceptions import ConfigurationError  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Sub-config dataclasses — all frozen to prevent accidental mutation during
@@ -182,7 +178,7 @@ class AppConfig:
     execution: ExecutionConfig
     output: OutputConfig
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the full configuration to a plain dictionary.
 
         Returns:
@@ -201,12 +197,12 @@ class AppConfig:
         Returns:
             Pretty-printed JSON string.
         """
-        import json
         import dataclasses as dc
+        import json
 
         return json.dumps(dc.asdict(self), indent=indent, default=str)
 
-    def to_yaml(self, path: Union[str, Path]) -> None:
+    def to_yaml(self, path: str | Path) -> None:
         """Write a frozen snapshot of this config to a YAML file.
 
         Args:
@@ -272,7 +268,7 @@ def is_valid_timeframe(tf: str) -> bool:
     return True
 
 
-def _deep_update(target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_update(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge *source* into *target*, skipping ``None`` values.
 
     Args:
@@ -431,7 +427,7 @@ def validate_config(config: AppConfig) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_strategy(raw: Dict[str, Any]) -> StrategyConfig:
+def _build_strategy(raw: dict[str, Any]) -> StrategyConfig:
     """Construct a :class:`StrategyConfig` from a raw YAML mapping.
 
     Args:
@@ -462,7 +458,7 @@ def _build_strategy(raw: Dict[str, Any]) -> StrategyConfig:
     )
 
 
-def _build_filters(raw: Dict[str, Any]) -> FiltersConfig:
+def _build_filters(raw: dict[str, Any]) -> FiltersConfig:
     """Construct a :class:`FiltersConfig` from a raw YAML mapping.
 
     Args:
@@ -489,7 +485,7 @@ def _build_filters(raw: Dict[str, Any]) -> FiltersConfig:
     )
 
 
-def _build_data(raw: Dict[str, Any]) -> DataConfig:
+def _build_data(raw: dict[str, Any]) -> DataConfig:
     """Construct a :class:`DataConfig` from a raw YAML mapping.
 
     Args:
@@ -511,7 +507,7 @@ def _build_data(raw: Dict[str, Any]) -> DataConfig:
     )
 
 
-def _build_execution(raw: Dict[str, Any]) -> ExecutionConfig:
+def _build_execution(raw: dict[str, Any]) -> ExecutionConfig:
     """Construct an :class:`ExecutionConfig` from a raw YAML mapping.
 
     Args:
@@ -537,7 +533,7 @@ def _build_execution(raw: Dict[str, Any]) -> ExecutionConfig:
     )
 
 
-def _build_output(raw: Dict[str, Any]) -> OutputConfig:
+def _build_output(raw: dict[str, Any]) -> OutputConfig:
     """Construct an :class:`OutputConfig` from a raw YAML mapping.
 
     Args:
@@ -559,8 +555,8 @@ def _build_output(raw: Dict[str, Any]) -> OutputConfig:
 
 
 def load_config(
-    config_path: Union[str, Path] = "config/default_config.yaml",
-    overrides: Optional[Dict[str, Any]] = None,
+    config_path: str | Path = "config/default_config.yaml",
+    overrides: dict[str, Any] | None = None,
 ) -> AppConfig:
     """Load, parse, and validate an ORB system configuration from a YAML file.
 
@@ -604,7 +600,7 @@ def load_config(
         )
 
     with path.open("r", encoding="utf-8") as fh:
-        raw: Dict[str, Any] = yaml.safe_load(fh) or {}
+        raw: dict[str, Any] = yaml.safe_load(fh) or {}
 
     # Apply overrides — CLI / programmatic values take precedence over YAML
     if overrides:

@@ -57,9 +57,10 @@ import dataclasses
 import datetime as _dt
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Union
+from typing import Any
 
 import yaml
 
@@ -80,7 +81,7 @@ from src.common.exceptions import ConfigurationError
 
 #: Dashboard's initial execution preset: one-minute research bars (P1-O2).
 #: Applied as ordinary overrides (explicit caller values still win).
-RESEARCH_PRESET_1MIN: Dict[str, Any] = {"data": {"timeframe": "1Min"}}
+RESEARCH_PRESET_1MIN: dict[str, Any] = {"data": {"timeframe": "1Min"}}
 
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
@@ -97,7 +98,7 @@ _OPTION_FIELDS = (
 
 #: Legacy ``parameters:`` keys and where they migrate to.  ``None`` target
 #: means a run option of the same name.
-_PARAMETER_TARGETS: Mapping[str, Optional[str]] = {
+_PARAMETER_TARGETS: Mapping[str, str | None] = {
     "symbol": None,  # special-cased: strategy.ticker + data.symbol
     "feed": "data.feed",
     "is_paper": "data.is_paper",
@@ -118,9 +119,9 @@ _CONFIG_SECTIONS: Mapping[str, Any] = {
 
 # Field-name -> kind, derived from the dataclasses so the allowlist cannot
 # drift from the implementation.
-_FIELD_KINDS: Dict[str, Dict[str, str]] = {}
+_FIELD_KINDS: dict[str, dict[str, str]] = {}
 for _section, _cls in _CONFIG_SECTIONS.items():
-    _kinds: Dict[str, str] = {}
+    _kinds: dict[str, str] = {}
     for _f in dataclasses.fields(_cls):
         _t = _f.type
         if _t == "bool":
@@ -157,12 +158,12 @@ class RunRequest:
     """
 
     config: AppConfig
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: str | None = None
+    end_date: str | None = None
     record_trace: bool = False
     refresh_cache: bool = False
     generate_plots: bool = True
-    run_label: Optional[str] = None
+    run_label: str | None = None
     log_level: str = "INFO"
 
 
@@ -249,7 +250,7 @@ def _nested_get(mapping: Mapping[str, Any], dotted: str) -> Any:
     return node
 
 
-def _nested_set(mapping: Dict[str, Any], dotted: str, value: Any) -> None:
+def _nested_set(mapping: dict[str, Any], dotted: str, value: Any) -> None:
     node = mapping
     parts = dotted.split(".")
     for part in parts[:-1]:
@@ -263,7 +264,7 @@ def _nested_set(mapping: Dict[str, Any], dotted: str, value: Any) -> None:
 
 def migrate_parameters(
     raw: Mapping[str, Any],
-) -> tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split legacy ``parameters:`` into config-default overrides + options.
 
     Explicit YAML section values always win over migrated defaults.  Unknown
@@ -279,8 +280,8 @@ def migrate_parameters(
             "Top-level 'parameters' must be a mapping.",
             field="parameters",
         )
-    config_defaults: Dict[str, Any] = {}
-    option_defaults: Dict[str, Any] = {}
+    config_defaults: dict[str, Any] = {}
+    option_defaults: dict[str, Any] = {}
     for name, value in params.items():
         if name not in _PARAMETER_TARGETS:
             raise ConfigurationError(
@@ -303,14 +304,11 @@ def migrate_parameters(
     return config_defaults, option_defaults
 
 
-def _deep_merge(base: Dict[str, Any], winner: Mapping[str, Any]) -> Dict[str, Any]:
+def _deep_merge(base: dict[str, Any], winner: Mapping[str, Any]) -> dict[str, Any]:
     """Recursively merge *winner* over *base* (new dict)."""
     merged = copy.deepcopy(base)
     for key, value in winner.items():
-        if (
-            isinstance(value, Mapping)
-            and isinstance(merged.get(key), dict)
-        ):
+        if isinstance(value, Mapping) and isinstance(merged.get(key), dict):
             merged[key] = _deep_merge(merged[key], value)
         else:
             merged[key] = copy.deepcopy(value)
@@ -474,9 +472,9 @@ def validate_request_values(request: RunRequest) -> None:
 
 
 def build_run_request(
-    config_path: Union[str, Path] = "config/default_config.yaml",
-    config_overrides: Optional[Mapping[str, Any]] = None,
-    options: Optional[Mapping[str, Any]] = None,
+    config_path: str | Path = "config/default_config.yaml",
+    config_overrides: Mapping[str, Any] | None = None,
+    options: Mapping[str, Any] | None = None,
 ) -> RunRequest:
     """Load, migrate, merge, and validate one effective run request.
 
@@ -504,7 +502,7 @@ def build_run_request(
 
     path = Path(config_path)
     with path.open("r", encoding="utf-8") as fh:
-        raw: Dict[str, Any] = yaml.safe_load(fh) or {}
+        raw: dict[str, Any] = yaml.safe_load(fh) or {}
 
     param_config_defaults, param_option_defaults = migrate_parameters(raw)
     merged_overrides = _deep_merge(param_config_defaults, config_overrides)
