@@ -403,7 +403,23 @@ def test_app_submit_flow_creates_watched_run(tmp_path):
         if svc.get_run(watched)["status"] in ("succeeded", "failed", "cancelled"):
             break
         __import__("time").sleep(0.5)
-    assert svc.get_run(watched)["status"] == "succeeded"
+    row = svc.get_run(watched)
+
+    if row["status"] != "succeeded":
+        worker_log = tmp_path / "runs" / f"worker-{watched}.log"
+
+        print("\n=== BACKGROUND RUN FAILURE ===")
+        print(f"run_id: {watched}")
+        print(f"status: {row['status']}")
+        print(f"error: {row.get('error')}")
+
+        if worker_log.exists():
+            print("\n=== WORKER LOG ===")
+            print(worker_log.read_text(encoding="utf-8", errors="replace"))
+        else:
+            print(f"Worker log missing: {worker_log}")
+
+    assert row["status"] == "succeeded", row.get("error")
 
     # Invalid input surfaces a field error without submitting.
     at2 = AppTest.from_file(app_path)
