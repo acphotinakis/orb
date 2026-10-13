@@ -19,7 +19,7 @@ dependencies = [
     "mplfinance>=0.12.9b0",
     "matplotlib>=3.7.0",
     "pyarrow>=14.0.0",
-    "plotly>=5.15.0",
+    "plotly>=7.1.0",
     "streamlit>=1.28.0",
 ]
 
